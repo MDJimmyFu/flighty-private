@@ -11,6 +11,18 @@
       "scheduled_departure": "",
       "scheduled_arrival": "",
       "added_at": "2026-04-09T08:44:16.211Z"
+    },
+    {
+      "id": "JL99-2026-04-09-1775740596579",
+      "flight_number": "JL99",
+      "date": "2026-04-09",
+      "origin": "HND",
+      "destination": "TSA",
+      "airline": "",
+      "aircraft_type": "",
+      "scheduled_departure": "",
+      "scheduled_arrival": "",
+      "added_at": "2026-04-09T13:16:36.579Z"
     }
   ]
 }
