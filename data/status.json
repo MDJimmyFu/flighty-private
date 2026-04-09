@@ -1,4 +1,29 @@
 {
-  "updated_at": null,
-  "flights": []
+  "updated_at": "2026-04-09T08:44:31.982033+00:00",
+  "flights": [
+    {
+      "id": "JL99-2026-05-16-1775724256211",
+      "flight_number": "JL99",
+      "date": "2026-05-16",
+      "airline": "",
+      "airline_iata": "JL",
+      "aircraft_type": "",
+      "origin": {
+        "iata": "HND",
+        "name": ""
+      },
+      "destination": {
+        "iata": "TSA",
+        "name": ""
+      },
+      "scheduled_departure": "",
+      "scheduled_arrival": "",
+      "actual_departure": null,
+      "actual_arrival": null,
+      "status": "scheduled",
+      "delay_departure": 0,
+      "delay_arrival": 0,
+      "live": null
+    }
+  ]
 }
