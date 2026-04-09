@@ -33,8 +33,9 @@ jobs:
 
       - name: Fetch flight data
         env:
+          AERODATABOX_KEY:   ${{ secrets.AERODATABOX_KEY }}
           AVIATIONSTACK_KEY: ${{ secrets.AVIATIONSTACK_KEY }}
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC:        ${{ secrets.NTFY_TOPIC }}
         run: python scripts/fetch_flights.py
 
       - name: Commit updated data

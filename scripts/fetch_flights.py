@@ -133,6 +133,103 @@ def notify(topic, title, body, priority="default", tags=None):
         print(f"  ntfy error: {e}")
 
 
+# ── AeroDataBox ─────────────────────────────────────────────────────────────
+
+def aerodatabox_flight(flight_iata, flight_date, api_key):
+    """Fetch flight info from AeroDataBox via RapidAPI. Returns list of normalized flights."""
+    try:
+        r = requests.get(
+            f"https://aerodatabox.p.rapidapi.com/flights/number/{flight_iata}/{flight_date}",
+            headers={
+                "X-RapidAPI-Key":  api_key,
+                "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
+            },
+            timeout=15,
+        )
+        if r.status_code == 404:
+            return []
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        print(f"  AeroDataBox error for {flight_iata}: {e}")
+        return []
+
+
+def _adb_time(t):
+    """Convert AeroDataBox time '2024-01-15 02:00Z' → ISO 8601."""
+    if not t:
+        return None
+    return t.replace(" ", "T").rstrip("Z") + "+00:00"
+
+
+def apply_aerodatabox(current, adb_flights, flight_date):
+    """Merge best-matching AeroDataBox flight into current dict."""
+    if not adb_flights:
+        return current
+
+    # Pick the flight whose departure date matches
+    f = None
+    for candidate in adb_flights:
+        sched = (candidate.get("departure") or {}).get("scheduledTimeUtc", "") or ""
+        if flight_date and sched.replace("T", " ").startswith(flight_date):
+            f = candidate
+            break
+    if f is None:
+        f = adb_flights[0]
+
+    dep = f.get("departure") or {}
+    arr = f.get("arrival")   or {}
+    dep_apt = dep.get("airport") or {}
+    arr_apt = arr.get("airport") or {}
+
+    def setif(key, value):
+        if value:
+            current[key] = value
+
+    airline  = f.get("airline")  or {}
+    aircraft = f.get("aircraft") or {}
+    setif("airline",              airline.get("name"))
+    setif("airline_iata",         airline.get("iata"))
+    setif("aircraft_type",        aircraft.get("model"))
+    setif("aircraft_registration", aircraft.get("reg"))
+
+    if dep_apt.get("iata"):  current.setdefault("origin", {})["iata"]      = dep_apt["iata"]
+    if dep_apt.get("name"):  current.setdefault("origin", {})["name"]      = dep_apt["name"]
+    if arr_apt.get("iata"):  current.setdefault("destination", {})["iata"] = arr_apt["iata"]
+    if arr_apt.get("name"):  current.setdefault("destination", {})["name"] = arr_apt["name"]
+
+    setif("scheduled_departure", _adb_time(dep.get("scheduledTimeUtc")))
+    setif("scheduled_arrival",   _adb_time(arr.get("scheduledTimeUtc")))
+    if dep.get("actualTimeUtc"): current["actual_departure"] = _adb_time(dep["actualTimeUtc"])
+    if arr.get("actualTimeUtc"): current["actual_arrival"]   = _adb_time(arr["actualTimeUtc"])
+
+    # Status mapping
+    status_map = {
+        "EnRoute": "active", "Landed": "landed", "Cancelled": "cancelled",
+        "Diverted": "diverted", "Departed": "active", "Expected": "scheduled",
+    }
+    if f.get("status"):
+        current["status"] = status_map.get(f["status"], "scheduled")
+
+    # Delays (prefer explicit field, fall back to computed)
+    if current.get("actual_departure") and current.get("scheduled_departure"):
+        d = delay_min(current["scheduled_departure"], current["actual_departure"])
+        if d is not None:
+            current["delay_departure"] = max(0, d)
+    elif dep.get("delay") is not None:
+        current["delay_departure"] = int(dep["delay"])
+
+    if current.get("actual_arrival") and current.get("scheduled_arrival"):
+        d = delay_min(current["scheduled_arrival"], current["actual_arrival"])
+        if d is not None:
+            current["delay_arrival"] = max(0, d)
+    elif arr.get("delay") is not None:
+        current["delay_arrival"] = int(arr["delay"])
+
+    return current
+
+
 # ── AviationStack ───────────────────────────────────────────────────────────
 
 def aviationstack_flight(flight_iata, flight_date, api_key):
@@ -368,8 +465,11 @@ def should_fetch_as(flight_meta, interval_min):
 
 
 def main():
-    api_key    = os.environ.get("AVIATIONSTACK_KEY", "").strip()
+    adb_key    = os.environ.get("AERODATABOX_KEY", "").strip()
+    as_key     = os.environ.get("AVIATIONSTACK_KEY", "").strip()
     ntfy_topic = os.environ.get("NTFY_TOPIC", "").strip()
+    # Alias for legacy references below
+    api_key = as_key
 
     flights_cfg = load_json("flights.json",   {"tracked": []})
     meta        = load_json("data/meta.json", {})
@@ -435,33 +535,46 @@ def main():
         f_hours_str = f"{f_hours:.1f}h" if f_hours is not None else "?"
         print(f"\n{flight_iata} ({flight_date}): phase={f_phase}, {f_hours_str} until dep")
 
-        # ── AviationStack: only in weekly/daily phase (schedule still may change) ──
-        # During hourly/5-min phase, the schedule is fixed — OpenSky handles live data.
-        # Free plan: 100 req/month. We conserve by skipping AS when airborne/near departure.
-        # When no AS key, we fall back to OpenSky's historical flights API (see below).
-        AS_USEFUL_PHASES = {"weekly", "daily", "monthly"}
-        if api_key and f_phase in AS_USEFUL_PHASES and should_fetch_as(f_meta, f_as_interval):
-            print(f"  → AviationStack call (phase={f_phase}, interval={f_as_interval}min)")
-            as_data = aviationstack_flight(flight_iata, flight_date, api_key)
-            if as_data:
-                current = apply_aviationstack(current, as_data)
-                print(f"    status={current.get('status')} delay_arr={current.get('delay_arrival')}min")
-            else:
-                print(f"    No data returned")
-            flight_meta[flight_id] = {
-                "last_as_fetch_at": now.isoformat(),
-                "phase": f_phase,
-                "as_interval_min": f_as_interval,
-            }
-        elif f_phase not in AS_USEFUL_PHASES:
-            print(f"  → Skipping AviationStack (phase={f_phase}, using OpenSky only)")
+        # ── Schedule enrichment: AeroDataBox → AviationStack fallback ──
+        # Only in weekly/daily/monthly phase — schedule is still subject to change.
+        # During hourly/5-min phase, schedule is locked; OpenSky handles live data.
+        SCHED_USEFUL_PHASES = {"weekly", "daily", "monthly"}
+        if f_phase in SCHED_USEFUL_PHASES and should_fetch_as(f_meta, f_as_interval):
+            fetched = False
+            # Try AeroDataBox first (100 req/day free — much better quota)
+            if adb_key:
+                print(f"  → AeroDataBox call (phase={f_phase})")
+                adb_flights = aerodatabox_flight(flight_iata, flight_date, adb_key)
+                if adb_flights:
+                    current = apply_aerodatabox(current, adb_flights, flight_date)
+                    print(f"    status={current.get('status')} delay_arr={current.get('delay_arrival')}min [ADB]")
+                    fetched = True
+                else:
+                    print(f"    AeroDataBox: no data, trying AviationStack fallback")
+            # Fall back to AviationStack (100 req/month)
+            if not fetched and api_key:
+                print(f"  → AviationStack call (phase={f_phase})")
+                as_data = aviationstack_flight(flight_iata, flight_date, api_key)
+                if as_data:
+                    current = apply_aviationstack(current, as_data)
+                    print(f"    status={current.get('status')} delay_arr={current.get('delay_arrival')}min [AS]")
+                else:
+                    print(f"    AviationStack: no data returned")
+            if adb_key or api_key:
+                flight_meta[flight_id] = {
+                    "last_as_fetch_at": now.isoformat(),
+                    "phase": f_phase,
+                    "as_interval_min": f_as_interval,
+                }
+        elif f_phase not in SCHED_USEFUL_PHASES:
+            print(f"  → Skipping schedule fetch (phase={f_phase}, using OpenSky only)")
         else:
             next_as = parse_dt(f_meta.get("last_as_fetch_at", ""))
             next_due = ""
             if next_as:
                 due = next_as + timedelta(minutes=f_as_interval)
-                next_due = f" (next AS due {due.strftime('%H:%M')} UTC)"
-            print(f"  → Skipping AviationStack{next_due}")
+                next_due = f" (next due {due.strftime('%H:%M')} UTC)"
+            print(f"  → Skipping schedule fetch{next_due}")
 
         # ── OpenSky live: one global call shared across all flights ──
         status = (current.get("status") or "").lower()

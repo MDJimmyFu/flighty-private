@@ -18,6 +18,7 @@ function loadSettings() {
   el('github-repo').value = s.githubRepo || 'MDJimmyFu/flighty-private';
   el('github-branch').value = s.githubBranch || 'main';
   el('ntfy-topic').value = s.ntfyTopic || '';
+  el('aerodatabox-key').value = s.aeroDataBoxKey || '';
   el('aviationstack-key').value = s.aviationstackKey || '';
   updateNtfyUrl();
 }
@@ -539,55 +540,117 @@ function scheduleAutoLookup() {
   _lookupTimer = setTimeout(() => doLookup(num.toUpperCase(), date), 700);
 }
 
-async function doLookup(flightNum, date) {
+/* ── AeroDataBox lookup ── */
+async function fetchAeroDataBox(flightNum, date) {
+  const key = getSetting('aeroDataBoxKey');
+  if (!key) return null;
+  const r = await fetch(
+    `https://aerodatabox.p.rapidapi.com/flights/number/${flightNum}/${date}`,
+    { headers: { 'X-RapidAPI-Key': key, 'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com' } }
+  );
+  if (r.status === 404) return [];
+  if (!r.ok) throw new Error(`AeroDataBox ${r.status}`);
+  const data = await r.json();
+  // Normalize to common format
+  return (Array.isArray(data) ? data : []).map(f => ({
+    departure: {
+      iata:      f.departure?.airport?.iata,
+      airport:   f.departure?.airport?.name,
+      scheduled: adbTime(f.departure?.scheduledTimeUtc),
+      actual:    adbTime(f.departure?.actualTimeUtc),
+      delay:     f.departure?.delay ?? null,
+    },
+    arrival: {
+      iata:      f.arrival?.airport?.iata,
+      airport:   f.arrival?.airport?.name,
+      scheduled: adbTime(f.arrival?.scheduledTimeUtc),
+      actual:    adbTime(f.arrival?.actualTimeUtc),
+      delay:     f.arrival?.delay ?? null,
+    },
+    airline:      { name: f.airline?.name, iata: f.airline?.iata },
+    aircraft:     { iata: f.aircraft?.model, registration: f.aircraft?.reg },
+    flight_status: adbStatus(f.status),
+    _source: 'aerodatabox',
+  }));
+}
+
+// AeroDataBox time: "2024-01-15 02:00Z" → ISO string
+function adbTime(t) {
+  if (!t) return null;
+  return t.replace(' ', 'T').replace(/Z$/, '+00:00');
+}
+function adbStatus(s) {
+  if (!s) return 'scheduled';
+  const m = { EnRoute: 'active', Landed: 'landed', Cancelled: 'cancelled',
+               Diverted: 'diverted', Departed: 'active', Expected: 'scheduled' };
+  return m[s] || 'scheduled';
+}
+
+/* ── AviationStack lookup ── */
+async function fetchAviationStack(flightNum, date) {
   const key = getSetting('aviationstackKey');
-  if (!key) {
+  if (!key) return null;
+  // AviationStack free tier only supports HTTP
+  const r = await fetch(
+    `http://api.aviationstack.com/v1/flights?access_key=${key}&flight_iata=${flightNum}&flight_date=${date}`
+  );
+  const data = await r.json();
+  if (data.error) throw new Error(data.error.message || 'AviationStack error');
+  return (data.data || []).map(f => ({ ...f, _source: 'aviationstack' }));
+}
+
+/* ── Main lookup orchestrator ── */
+async function doLookup(flightNum, date) {
+  const hasAdb = !!getSetting('aeroDataBoxKey');
+  const hasAs  = !!getSetting('aviationstackKey');
+
+  if (!hasAdb && !hasAs) {
     setLookupStatus('error',
-      '⚠️ No AviationStack key — fill in departure/arrival manually, or add a key in Settings.');
+      '⚠️ 尚未設定 API Key — 請至 Settings 加入 AeroDataBox 或 AviationStack Key，或手動填寫。');
     return;
   }
 
   setLookupStatus('loading',
-    `<span class="lookup-spinner"></span> Looking up ${flightNum} on ${date}…`);
+    `<span class="lookup-spinner"></span> 查詢 ${flightNum} (${date})…`);
   hide('lookup-options');
 
+  let flights = null;
+  let source  = '';
+
   try {
-    const url = `https://api.aviationstack.com/v1/flights?access_key=${key}&flight_iata=${flightNum}&flight_date=${date}`;
-    const r   = await fetch(url);
-    const data = await r.json();
-
-    if (data.error) {
-      setLookupStatus('error', `⚠️ AviationStack: ${data.error.message || 'API error'}`);
-      return;
+    if (hasAdb) {
+      flights = await fetchAeroDataBox(flightNum, date);
+      source  = 'AeroDataBox';
     }
-
-    const flights = (data.data || []).filter(f =>
-      f.departure?.iata && f.arrival?.iata
-    );
-
-    if (flights.length === 0) {
-      setLookupStatus('error', `✕ No schedule found for ${flightNum} on ${date}. Fill in manually.`);
-      return;
-    }
-
-    // Deduplicate by origin→dest route
-    const seen = new Set();
-    const unique = flights.filter(f => {
-      const key = `${f.departure.iata}-${f.arrival.iata}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    if (unique.length === 1) {
-      applyFlightData(unique[0]);
-      setLookupStatus('success', `✓ Auto-filled from AviationStack`);
-    } else {
-      setLookupStatus('success', `✓ Found ${unique.length} routes — select one below`);
-      showLookupOptions(unique);
+    if ((!flights || flights.length === 0) && hasAs) {
+      flights = await fetchAviationStack(flightNum, date);
+      source  = 'AviationStack';
     }
   } catch (e) {
-    setLookupStatus('error', `⚠️ Lookup failed: ${e.message}`);
+    setLookupStatus('error', `⚠️ 查詢失敗：${e.message}`);
+    return;
+  }
+
+  const valid = (flights || []).filter(f => f.departure?.iata && f.arrival?.iata);
+  if (valid.length === 0) {
+    setLookupStatus('error', `✕ 找不到 ${flightNum} 在 ${date} 的班次，請手動填寫。`);
+    return;
+  }
+
+  // Deduplicate by route
+  const seen = new Set();
+  const unique = valid.filter(f => {
+    const k = `${f.departure.iata}-${f.arrival.iata}`;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+
+  if (unique.length === 1) {
+    applyFlightData(unique[0]);
+    setLookupStatus('success', `✓ 已自動填入（來源：${source}）`);
+  } else {
+    setLookupStatus('success', `✓ 找到 ${unique.length} 個航線（來源：${source}）— 請選擇`);
+    showLookupOptions(unique);
   }
 }
 
@@ -767,6 +830,11 @@ document.addEventListener('DOMContentLoaded', () => {
   el('btn-test-ntfy').addEventListener('click', testNtfy);
   el('btn-gen-topic').addEventListener('click', genTopic);
   el('ntfy-topic').addEventListener('input', updateNtfyUrl);
+  el('btn-save-adb').addEventListener('click', () => {
+    saveSettings({ aeroDataBoxKey: el('aerodatabox-key').value.trim() });
+    el('adb-status').textContent = '✓ Saved';
+    setTimeout(() => el('adb-status').textContent = '', 2000);
+  });
   el('btn-save-as').addEventListener('click', () => {
     saveSettings({ aviationstackKey: el('aviationstack-key').value.trim() });
     el('as-status').textContent = '✓ Saved';

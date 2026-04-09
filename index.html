@@ -233,15 +233,30 @@
       </div>
 
       <div class="card">
+        <h3>AeroDataBox API (推薦，Optional)</h3>
+        <p class="hint">
+          查詢排班資訊首選。免費額度 <strong>100 次/天</strong>，遠高於 AviationStack。<br>
+          透過 RapidAPI 申請：<a href="https://rapidapi.com/aedbx-aedbx/api/aerodatabox" target="_blank">Get free key →</a>
+        </p>
+        <div class="form-group">
+          <label>RapidAPI Key</label>
+          <input type="password" id="aerodatabox-key" placeholder="Your RapidAPI key">
+          <small>也請在 GitHub Secrets 新增 <code>AERODATABOX_KEY</code> 供背景自動更新使用</small>
+        </div>
+        <button class="btn-primary" id="btn-save-adb">Save</button>
+        <span class="save-status" id="adb-status"></span>
+      </div>
+
+      <div class="card">
         <h3>AviationStack API (Optional)</h3>
         <p class="hint">
-          Enables auto-lookup of flight info (times, aircraft, airline) when adding flights.<br>
-          Free tier: 1,000 calls/month. <a href="https://aviationstack.com" target="_blank">Get free key →</a>
+          備用查詢來源。免費額度 100 次/月，僅支援 HTTP（非 HTTPS）。<br>
+          <a href="https://aviationstack.com" target="_blank">Get free key →</a>
         </p>
         <div class="form-group">
           <label>API Key</label>
           <input type="password" id="aviationstack-key" placeholder="Your AviationStack API key">
-          <small>Also set this as <code>AVIATIONSTACK_KEY</code> in GitHub Secrets for automatic updates</small>
+          <small>也請在 GitHub Secrets 新增 <code>AVIATIONSTACK_KEY</code></small>
         </div>
         <button class="btn-primary" id="btn-save-as">Save</button>
         <span class="save-status" id="as-status"></span>
