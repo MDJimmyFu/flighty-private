@@ -244,83 +244,121 @@ def iata_to_callsign(flight_iata):
     return f"{icao}{number}"
 
 
-def opensky_live(callsign):
-    """Search OpenSky for a live flight by callsign. Rate limit: ~10 req/min for anon."""
-    target = callsign.strip().upper().ljust(8)  # OpenSky pads callsigns to 8 chars
-    target_strip = callsign.strip().upper()
+def fetch_opensky_states():
+    """Fetch ALL live aircraft states from OpenSky — one call shared across all flights."""
     try:
-        r = requests.get(
-            "https://opensky-network.org/api/states/all",
-            timeout=20,
-        )
+        r = requests.get("https://opensky-network.org/api/states/all", timeout=20)
         r.raise_for_status()
-        states = r.json().get("states") or []
-        for s in states:
-            cs = (s[1] or "").strip().upper()
-            if cs == target_strip:
-                return {
-                    "icao24":        s[0],
-                    "callsign":      cs,
-                    "latitude":      s[6],
-                    "longitude":     s[5],
-                    "altitude_m":    s[7],  # geometric altitude in metres
-                    "altitude_ft":   int((s[7] or 0) * 3.28084),
-                    "on_ground":     s[8],
-                    "velocity_ms":   s[9],
-                    "speed_kt":      int((s[9] or 0) * 1.94384),
-                    "heading":       s[10],
-                    "vertical_rate": s[11],
-                    "updated_at":    datetime.now(timezone.utc).isoformat(),
-                }
+        return r.json().get("states") or []
     except Exception as e:
         print(f"  OpenSky error: {e}")
+        return []
+
+
+def find_in_states(states, callsign):
+    """Search pre-fetched OpenSky states for a specific callsign."""
+    target = callsign.strip().upper()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for s in states:
+        cs = (s[1] or "").strip().upper()
+        if cs == target:
+            return {
+                "icao24":        s[0],
+                "callsign":      cs,
+                "latitude":      s[6],
+                "longitude":     s[5],
+                "altitude_m":    s[7],
+                "altitude_ft":   int((s[7] or 0) * 3.28084),
+                "on_ground":     s[8],
+                "velocity_ms":   s[9],
+                "speed_kt":      int((s[9] or 0) * 1.94384),
+                "heading":       s[10],
+                "vertical_rate": s[11],
+                "updated_at":    now_iso,
+            }
     return None
 
 
 # ── Main logic ──────────────────────────────────────────────────────────────
 
+def flight_hours_until(t, now):
+    """Hours until this specific flight departs (negative = already departed)."""
+    dep_str = t.get("scheduled_departure") or ""
+    dt = parse_dt(dep_str)
+    if not dt:
+        date_str = t.get("date", "")
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=0, minute=0, tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return (dt - now).total_seconds() / 3600
+
+
+def flight_phase(hours):
+    """Return (phase_name, as_interval_min) for a single flight based on hours until departure."""
+    if hours is None:
+        return "unknown", 30 * 24 * 60
+    abs_h = abs(hours)
+    for phase_name, threshold_hours, interval_min in PHASES:
+        if abs_h <= threshold_hours:
+            return phase_name, interval_min
+    return "monthly", 30 * 24 * 60
+
+
+def should_fetch_as(flight_meta, interval_min):
+    """Check if AviationStack should be called for this specific flight."""
+    last = parse_dt(flight_meta.get("last_as_fetch_at", ""))
+    if not last:
+        return True
+    elapsed = (datetime.now(timezone.utc) - last).total_seconds() / 60
+    return elapsed >= interval_min
+
+
 def main():
     api_key    = os.environ.get("AVIATIONSTACK_KEY", "").strip()
     ntfy_topic = os.environ.get("NTFY_TOPIC", "").strip()
 
-    flights_cfg = load_json("flights.json",      {"tracked": []})
-    meta        = load_json("data/meta.json",    {})
+    flights_cfg = load_json("flights.json",   {"tracked": []})
+    meta        = load_json("data/meta.json", {})
 
     tracked = flights_cfg.get("tracked", [])
-    phase, interval_min = get_fetch_interval(tracked)
-    hours = nearest_flight_hours(tracked)
 
-    hours_str = f"{hours:.1f}h away" if hours is not None else "none"
-    print(f"Phase: {phase} | Nearest flight: {hours_str} | Interval: {interval_min}min")
+    # ── Global phase: determines if we run at all ──
+    global_phase, global_interval = get_fetch_interval(tracked)
+    nearest_hours = nearest_flight_hours(tracked)
+    hours_str = f"{nearest_hours:.1f}h away" if nearest_hours is not None else "none"
+    print(f"Global phase: {global_phase} | Nearest: {hours_str} | Global interval: {global_interval}min")
 
-    if not should_fetch(meta, interval_min):
+    if not should_fetch(meta, global_interval):
         last = meta.get("last_fetch_at", "never")
-        print(f"Skipping — last fetch: {last}, interval: {interval_min}min. No work to do.")
+        print(f"Skipping — last fetch: {last}. Next due in {global_interval}min.")
         sys.exit(0)
 
-    print("Proceeding with fetch...")
+    print("Proceeding with fetch run...")
 
-    old_status  = load_json("data/status.json",  {"flights": []})
-    history     = load_json("data/history.json", {"flights": []})
+    old_status = load_json("data/status.json",  {"flights": []})
+    history    = load_json("data/history.json", {"flights": []})
 
-    old_map = {f["id"]: f for f in old_status.get("flights", [])}
+    old_map  = {f["id"]: f for f in old_status.get("flights", [])}
     hist_ids = {f["id"] for f in history.get("flights", [])}
+
+    # Per-flight AS metadata (last call time per flight)
+    flight_meta = meta.get("flights", {})
 
     now = datetime.now(timezone.utc)
     active_flights = []
+    opensky_states = None  # Lazy-loaded once if any flight needs it
 
-    for t in flights_cfg.get("tracked", []):
+    for t in tracked:
         flight_id   = t["id"]
         flight_iata = t["flight_number"].upper().replace(" ", "")
         flight_date = t.get("date", "")
-        print(f"\nProcessing {flight_iata} ({flight_date})")
 
-        # If already in history, skip
         if flight_id in hist_ids:
-            print(f"  Already in history, skipping")
+            print(f"\n{flight_iata}: already in history, skipping")
             continue
 
-        # Determine if flight date is too far in the past
+        # Archive if too old
         try:
             flight_day = datetime.strptime(flight_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             days_ago = (now - flight_day).days
@@ -328,116 +366,130 @@ def main():
             days_ago = 0
 
         if days_ago > 3:
-            print(f"  Flight was {days_ago} days ago, archiving")
-            # Archive with whatever data we have
+            print(f"\n{flight_iata}: {days_ago} days old, archiving")
             current = old_map.get(flight_id, _default_flight(t))
             current.pop("live", None)
             history["flights"].append(current)
             continue
 
-        # Build current from previous data or defaults
         current = dict(old_map.get(flight_id, _default_flight(t)))
 
-        # Fetch from AviationStack if key available
-        if api_key:
-            print(f"  Fetching AviationStack...")
+        # ── Per-flight phase: controls AviationStack call frequency ──
+        f_hours = flight_hours_until(t, now)
+        f_phase, f_as_interval = flight_phase(f_hours)
+        f_meta = flight_meta.get(flight_id, {})
+
+        f_hours_str = f"{f_hours:.1f}h" if f_hours is not None else "?"
+        print(f"\n{flight_iata} ({flight_date}): phase={f_phase}, {f_hours_str} until dep")
+
+        # ── AviationStack: only if this flight's own interval has elapsed ──
+        if api_key and should_fetch_as(f_meta, f_as_interval):
+            print(f"  → AviationStack call (interval={f_as_interval}min)")
             as_data = aviationstack_flight(flight_iata, flight_date, api_key)
             if as_data:
                 current = apply_aviationstack(current, as_data)
-                print(f"  Status: {current.get('status')} | Delay arr: {current.get('delay_arrival')}min")
+                print(f"    status={current.get('status')} delay_arr={current.get('delay_arrival')}min")
             else:
-                print(f"  No AviationStack data")
+                print(f"    No data returned")
+            flight_meta[flight_id] = {
+                "last_as_fetch_at": now.isoformat(),
+                "phase": f_phase,
+                "as_interval_min": f_as_interval,
+            }
+        else:
+            next_as = parse_dt(f_meta.get("last_as_fetch_at", ""))
+            next_due = ""
+            if next_as:
+                due = next_as + timedelta(minutes=f_as_interval)
+                next_due = f" (next AS due {due.strftime('%H:%M')} UTC)"
+            print(f"  → Skipping AviationStack{next_due}")
 
-        # Fetch live position from OpenSky (only if not landed/cancelled)
+        # ── OpenSky: one global call shared across all flights ──
         status = (current.get("status") or "").lower()
         if status not in ("landed", "cancelled", "diverted"):
+            # Load OpenSky states once for all flights
+            if opensky_states is None:
+                print(f"  → Fetching OpenSky states (shared)")
+                opensky_states = fetch_opensky_states()
+
             callsign = iata_to_callsign(flight_iata)
-            print(f"  Searching OpenSky for callsign: {callsign}")
-            live = opensky_live(callsign)
+            live = find_in_states(opensky_states, callsign)
             if live:
                 current["live"] = live
-                print(f"  Live! Alt: {live['altitude_ft']}ft, Spd: {live['speed_kt']}kt")
+                print(f"    Live: alt={live['altitude_ft']}ft spd={live['speed_kt']}kt")
                 if live["on_ground"] and status == "active":
                     current["status"] = "landed"
                 elif not live["on_ground"]:
                     current["status"] = "active"
             else:
-                print(f"  Not found in OpenSky")
+                print(f"    Not found in OpenSky (callsign: {callsign})")
                 current["live"] = None
         else:
             current["live"] = None
 
-        # ── Check for changes and notify ──
-        old = old_map.get(flight_id, {})
-
-        old_delay  = old.get("delay_arrival", 0) or 0
-        new_delay  = current.get("delay_arrival", 0) or 0
-        old_status = (old.get("status") or "").lower()
-        new_status = (current.get("status") or "").lower()
-
+        # ── Notifications ──
+        old       = old_map.get(flight_id, {})
+        old_delay = old.get("delay_arrival", 0) or 0
+        new_delay = current.get("delay_arrival", 0) or 0
+        old_st    = (old.get("status") or "").lower()
+        new_st    = (current.get("status") or "").lower()
         orig = current.get("origin", {}).get("iata", "???")
         dest = current.get("destination", {}).get("iata", "???")
         fn   = current.get("flight_number", flight_iata)
 
         if ntfy_topic:
-            # Delay change (>= 5 min difference)
             if abs(new_delay - old_delay) >= 5 and old_delay != 0:
                 direction = "increased" if new_delay > old_delay else "decreased"
-                priority  = "high" if new_delay > 60 else "default"
-                notify(
-                    ntfy_topic,
-                    f"✈️ {fn} Delay {'+' if new_delay > old_delay else '-'}{abs(new_delay - old_delay)}min",
-                    f"Arrival delay {direction} to {new_delay}min\n"
-                    f"{orig} → {dest}\n"
-                    f"Scheduled: {current.get('scheduled_arrival', 'Unknown')}",
-                    priority=priority, tags=["airplane"],
-                )
-            # First delay detected
+                notify(ntfy_topic,
+                    f"✈️ {fn} Delay {'+' if new_delay > old_delay else '-'}{abs(new_delay-old_delay)}min",
+                    f"Arrival delay {direction} to {new_delay}min\n{orig} → {dest}",
+                    priority="high" if new_delay > 60 else "default", tags=["airplane"])
             elif new_delay >= 15 and old_delay < 15:
-                notify(
-                    ntfy_topic,
-                    f"⏰ {fn} Delayed +{new_delay}min",
-                    f"{orig} → {dest}\n"
-                    f"Arrival delayed by {new_delay} minutes",
-                    priority="default" if new_delay < 60 else "high",
-                    tags=["warning", "airplane"],
-                )
-            # Status changes
-            if new_status != old_status:
-                if new_status == "landed":
-                    msg = f"On time ✓" if new_delay <= 15 else f"+{new_delay}min late"
-                    notify(ntfy_topic, f"✅ {fn} Landed", f"{orig} → {dest}\n{msg}", tags=["white_check_mark"])
-                elif new_status == "cancelled":
-                    notify(ntfy_topic, f"❌ {fn} CANCELLED", f"Flight {fn} ({orig}→{dest}) cancelled!", priority="urgent", tags=["x"])
-                elif new_status == "active" and old_status == "scheduled":
+                notify(ntfy_topic, f"⏰ {fn} Delayed +{new_delay}min",
+                    f"{orig} → {dest}\nArrival delayed {new_delay} minutes",
+                    priority="high" if new_delay > 60 else "default", tags=["warning", "airplane"])
+            if new_st != old_st:
+                if new_st == "landed":
+                    notify(ntfy_topic, f"✅ {fn} Landed",
+                        f"{orig} → {dest}\n{'On time ✓' if new_delay <= 15 else f'+{new_delay}min late'}",
+                        tags=["white_check_mark"])
+                elif new_st == "cancelled":
+                    notify(ntfy_topic, f"❌ {fn} CANCELLED",
+                        f"Flight {fn} ({orig}→{dest}) cancelled!", priority="urgent", tags=["x"])
+                elif new_st == "active" and old_st == "scheduled":
                     notify(ntfy_topic, f"🛫 {fn} Departed", f"{orig} → {dest}", tags=["airplane"])
 
         # Move to history if completed
-        if (current.get("status") or "").lower() in ("landed", "cancelled") and days_ago >= 1:
+        if new_st in ("landed", "cancelled") and days_ago >= 1:
             entry = dict(current)
             entry.pop("live", None)
             history["flights"].append(entry)
             hist_ids.add(flight_id)
-            print(f"  Moved to history (status: {current['status']})")
+            print(f"  Moved to history")
             continue
 
         active_flights.append(current)
 
-    # Save outputs
+    # Save
     save_json("data/status.json", {
         "updated_at": now.isoformat(),
         "flights": active_flights,
     })
     save_json("data/history.json", history)
     save_json("data/meta.json", {
-        "last_fetch_at":   now.isoformat(),
-        "phase":           phase,
-        "interval_min":    interval_min,
-        "next_fetch_at":   (now + timedelta(minutes=interval_min)).isoformat(),
-        "nearest_flight_hours": round(hours, 2) if hours is not None else None,
+        "last_fetch_at":        now.isoformat(),
+        "phase":                global_phase,
+        "interval_min":         global_interval,
+        "next_fetch_at":        (now + timedelta(minutes=global_interval)).isoformat(),
+        "nearest_flight_hours": round(nearest_hours, 2) if nearest_hours is not None else None,
+        "flights":              flight_meta,
     })
-    print(f"\nDone. Phase: {phase} | Active: {len(active_flights)} | History: {len(history['flights'])}")
-    print(f"Next fetch due in {interval_min}min (~{(now + timedelta(minutes=interval_min)).strftime('%Y-%m-%d %H:%M')} UTC)")
+    as_calls = sum(1 for fid, fm in flight_meta.items()
+                   if fm.get("last_as_fetch_at", "").startswith(now.strftime("%Y-%m-%d")))
+    opensky_calls = 1 if opensky_states is not None else 0
+    print(f"\nDone. Active: {len(active_flights)} | History: {len(history['flights'])}")
+    print(f"API calls this run → AviationStack: {as_calls} | OpenSky: {opensky_calls}")
+    print(f"Next global fetch in {global_interval}min")
 
 
 def _default_flight(t):
