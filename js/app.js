@@ -78,7 +78,17 @@ async function ghPutFile(path, content, sha, message) {
   };
   if (sha) body.sha = sha;
   const r = await fetch(url, { method: 'PUT', headers: ghHeaders(), body: JSON.stringify(body) });
-  if (!r.ok) { const e = await r.json(); throw new Error(e.message || r.status); }
+  if (!r.ok) {
+    const e = await r.json();
+    const msg = e.message || String(r.status);
+    if (msg.includes('Resource not accessible') || msg.includes('not accessible by personal access token')) {
+      throw new Error(
+        'Token permission denied. Use a Classic PAT (not fine-grained) with the "repo" scope. ' +
+        'Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic).'
+      );
+    }
+    throw new Error(msg);
+  }
   return r.json();
 }
 
