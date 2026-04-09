@@ -1,0 +1,7 @@
+{
+  "last_fetch_at": null,
+  "phase": "no-flights",
+  "interval_min": 43200,
+  "next_fetch_at": null,
+  "nearest_flight_hours": null
+}

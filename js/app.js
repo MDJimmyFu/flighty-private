@@ -116,6 +116,22 @@ async function loadData() {
       const upd = statusResult.value.data.updated_at;
       if (upd) el('last-updated').textContent = 'Updated ' + timeAgo(upd);
     }
+    // Show fetch phase from meta
+    try {
+      const metaResult = await fetchRaw('data/meta.json');
+      const meta = metaResult.data;
+      const phaseLabel = {
+        'every-5min': '⚡ Live (every 5min)',
+        'hourly':     '🕐 Hourly',
+        'daily':      '📅 Daily',
+        'weekly':     '📆 Weekly',
+        'monthly':    '🗓 Monthly',
+        'no-flights': '💤 Standby',
+      };
+      const label = phaseLabel[meta.phase] || meta.phase;
+      const next  = meta.next_fetch_at ? ' · next ' + timeAgo(meta.next_fetch_at).replace(' ago','') : '';
+      el('last-updated').textContent = (el('last-updated').textContent || '') + `  ${label}`;
+    } catch { /* meta not yet available */ }
     if (historyResult.status === 'fulfilled') {
       STATE.history = historyResult.value.data.flights || [];
     }

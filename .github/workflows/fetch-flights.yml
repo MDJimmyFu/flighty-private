@@ -41,6 +41,6 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore: update flight status [skip ci]'
-          file_pattern: 'data/*.json'
+          file_pattern: 'data/status.json data/history.json data/meta.json'
           commit_user_name: 'Flighty Bot'
           commit_user_email: 'flighty-bot@users.noreply.github.com'

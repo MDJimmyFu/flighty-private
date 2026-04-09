@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
 Flighty Private — GitHub Actions data fetcher.
-Runs every 5 minutes, fetches live flight data, sends ntfy notifications.
+Workflow runs every 5 minutes, but this script uses adaptive throttling:
+  - No upcoming flights (>30 days away): fetch monthly
+  - Within 30 days:                      fetch weekly
+  - Within 3 days:                       fetch daily
+  - Within 12 hours:                     fetch hourly
+  - Within 3 hours of departure:         fetch every 5 minutes
 """
 import json
 import os
 import sys
-import time
 import requests
 from datetime import datetime, timezone, timedelta
 
@@ -42,6 +46,71 @@ def delay_min(scheduled, actual):
     if s and a:
         return int((a - s).total_seconds() / 60)
     return None
+
+
+# ── Adaptive throttle ──────────────────────────────────────────────────────
+
+# Phase name → minimum minutes between fetches
+PHASES = [
+    ("every-5min",  3,         5),       # departure within 3h   → every 5 min
+    ("hourly",      12,        60),      # departure within 12h  → every hour
+    ("daily",       3 * 24,    24 * 60), # departure within 3d   → every day
+    ("weekly",      30 * 24,   7 * 24 * 60), # within 30 days   → every week
+    ("monthly",     float("inf"), 30 * 24 * 60), # farther       → every month
+]
+
+
+def nearest_flight_hours(tracked):
+    """
+    Returns the minimum hours until (or since) any tracked flight's departure.
+    Considers flights up to 24h after departure (in case still airborne/landing).
+    Returns None if there are no tracked flights.
+    """
+    now = datetime.now(timezone.utc)
+    best = None
+    for t in tracked:
+        # Use scheduled_departure if available, otherwise midnight of flight date
+        dep_str = t.get("scheduled_departure") or ""
+        dt = parse_dt(dep_str)
+        if not dt:
+            date_str = t.get("date", "")
+            if not date_str:
+                continue
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d").replace(
+                    hour=0, minute=0, tzinfo=timezone.utc
+                )
+            except ValueError:
+                continue
+
+        hours = (dt - now).total_seconds() / 3600
+        # Still relevant if flight was < 24h ago (might still be in the air)
+        if hours < -24:
+            continue
+        dist = abs(hours) if hours < 0 else hours
+        if best is None or dist < best:
+            best = dist
+    return best
+
+
+def get_fetch_interval(tracked):
+    """Return (phase_name, interval_minutes) based on nearest flight."""
+    hours = nearest_flight_hours(tracked)
+    if hours is None:
+        return "no-flights", 30 * 24 * 60  # monthly if nothing tracked
+    for phase_name, threshold_hours, interval_min in PHASES:
+        if hours <= threshold_hours:
+            return phase_name, interval_min
+    return "monthly", 30 * 24 * 60
+
+
+def should_fetch(meta, interval_min):
+    """Return True if enough time has elapsed since the last successful fetch."""
+    last = parse_dt(meta.get("last_fetch_at", ""))
+    if not last:
+        return True
+    elapsed = (datetime.now(timezone.utc) - last).total_seconds() / 60
+    return elapsed >= interval_min
 
 
 # ── Push notification ───────────────────────────────────────────────────────
@@ -215,6 +284,22 @@ def main():
     ntfy_topic = os.environ.get("NTFY_TOPIC", "").strip()
 
     flights_cfg = load_json("flights.json",      {"tracked": []})
+    meta        = load_json("data/meta.json",    {})
+
+    tracked = flights_cfg.get("tracked", [])
+    phase, interval_min = get_fetch_interval(tracked)
+    hours = nearest_flight_hours(tracked)
+
+    hours_str = f"{hours:.1f}h away" if hours is not None else "none"
+    print(f"Phase: {phase} | Nearest flight: {hours_str} | Interval: {interval_min}min")
+
+    if not should_fetch(meta, interval_min):
+        last = meta.get("last_fetch_at", "never")
+        print(f"Skipping — last fetch: {last}, interval: {interval_min}min. No work to do.")
+        sys.exit(0)
+
+    print("Proceeding with fetch...")
+
     old_status  = load_json("data/status.json",  {"flights": []})
     history     = load_json("data/history.json", {"flights": []})
 
@@ -344,7 +429,15 @@ def main():
         "flights": active_flights,
     })
     save_json("data/history.json", history)
-    print(f"\nDone. Active: {len(active_flights)}, History: {len(history['flights'])}")
+    save_json("data/meta.json", {
+        "last_fetch_at":   now.isoformat(),
+        "phase":           phase,
+        "interval_min":    interval_min,
+        "next_fetch_at":   (now + timedelta(minutes=interval_min)).isoformat(),
+        "nearest_flight_hours": round(hours, 2) if hours is not None else None,
+    })
+    print(f"\nDone. Phase: {phase} | Active: {len(active_flights)} | History: {len(history['flights'])}")
+    print(f"Next fetch due in {interval_min}min (~{(now + timedelta(minutes=interval_min)).strftime('%Y-%m-%d %H:%M')} UTC)")
 
 
 def _default_flight(t):
