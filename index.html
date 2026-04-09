@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0a0e17">
+  <title>✈️ My Flights</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Nav -->
+  <nav class="nav">
+    <div class="nav-brand">✈️ <span>My Flights</span></div>
+    <div class="nav-tabs" id="nav-tabs">
+      <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+      <button class="nav-tab" data-tab="add">Add Flight</button>
+      <button class="nav-tab" data-tab="history">History</button>
+      <button class="nav-tab" data-tab="stats">Statistics</button>
+      <button class="nav-tab" data-tab="settings">Settings</button>
+    </div>
+    <button class="nav-menu-btn" id="nav-menu-btn">☰</button>
+  </nav>
+
+  <!-- Dashboard -->
+  <div id="tab-dashboard" class="tab-content active">
+    <div class="container">
+      <div class="tab-header">
+        <h2>Active &amp; Upcoming</h2>
+        <div class="header-actions">
+          <span class="last-updated" id="last-updated"></span>
+          <button class="btn-icon" id="btn-refresh" title="Refresh data">↻</button>
+        </div>
+      </div>
+      <div id="flights-container"></div>
+      <div id="empty-dashboard" class="empty-state hidden">
+        <div class="empty-icon">✈️</div>
+        <h3>No Active Flights</h3>
+        <p>Add a flight to start tracking</p>
+        <button class="btn-primary" onclick="switchTab('add')">Add Flight</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Flight -->
+  <div id="tab-add" class="tab-content">
+    <div class="container">
+      <h2>Add Flight</h2>
+      <div class="card">
+        <form id="add-flight-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Flight Number <span class="required">*</span></label>
+              <input type="text" id="flight-number" placeholder="e.g. CI123" required autocomplete="off" style="text-transform:uppercase">
+            </div>
+            <div class="form-group">
+              <label>Date <span class="required">*</span></label>
+              <input type="date" id="flight-date" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Origin (IATA) <span class="required">*</span></label>
+              <input type="text" id="origin" placeholder="TPE" maxlength="3" required autocomplete="off" style="text-transform:uppercase">
+            </div>
+            <div class="form-group">
+              <label>Destination (IATA) <span class="required">*</span></label>
+              <input type="text" id="destination" placeholder="NRT" maxlength="3" required autocomplete="off" style="text-transform:uppercase">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Scheduled Departure</label>
+              <input type="datetime-local" id="sched-dep">
+            </div>
+            <div class="form-group">
+              <label>Scheduled Arrival</label>
+              <input type="datetime-local" id="sched-arr">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Airline</label>
+              <input type="text" id="airline" placeholder="China Airlines">
+            </div>
+            <div class="form-group">
+              <label>Aircraft Type</label>
+              <input type="text" id="aircraft-type" placeholder="A359">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-secondary" id="btn-lookup">🔍 Auto Lookup</button>
+            <button type="submit" class="btn-primary">Add Flight</button>
+          </div>
+        </form>
+      </div>
+      <div id="lookup-result" class="card hidden">
+        <h4>Lookup Result</h4>
+        <div id="lookup-result-content"></div>
+        <button class="btn-primary" id="btn-use-lookup">Use This Data</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div id="tab-history" class="tab-content">
+    <div class="container">
+      <div class="tab-header">
+        <h2>Flight History</h2>
+        <div class="filter-row">
+          <select id="history-filter-airline" class="filter-select">
+            <option value="">All Airlines</option>
+          </select>
+          <select id="history-filter-year" class="filter-select">
+            <option value="">All Years</option>
+          </select>
+        </div>
+      </div>
+      <div id="history-container"></div>
+      <div id="empty-history" class="empty-state hidden">
+        <div class="empty-icon">📋</div>
+        <h3>No History Yet</h3>
+        <p>Completed flights will appear here automatically</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Statistics -->
+  <div id="tab-stats" class="tab-content">
+    <div class="container">
+      <h2>Statistics</h2>
+      <div class="stats-summary">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-total">—</div>
+          <div class="stat-label">Total Flights</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-avg-delay">—</div>
+          <div class="stat-label">Avg Delay (min)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-ontime">—</div>
+          <div class="stat-label">On Time Rate</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-top-airline">—</div>
+          <div class="stat-label">Top Airline</div>
+        </div>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Airlines</h3>
+          <div class="chart-wrap"><canvas id="chart-airlines"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Aircraft Types</h3>
+          <div class="chart-wrap"><canvas id="chart-aircraft"></canvas></div>
+        </div>
+        <div class="chart-card wide">
+          <h3>Delay Distribution</h3>
+          <div class="chart-wrap"><canvas id="chart-delays"></canvas></div>
+        </div>
+        <div class="chart-card wide">
+          <h3>Monthly Flights</h3>
+          <div class="chart-wrap"><canvas id="chart-monthly"></canvas></div>
+        </div>
+      </div>
+      <div id="empty-stats" class="empty-state hidden">
+        <div class="empty-icon">📊</div>
+        <h3>No Data Yet</h3>
+        <p>Statistics will appear once you have flight history</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div id="tab-settings" class="tab-content">
+    <div class="container">
+      <h2>Settings</h2>
+
+      <div class="card">
+        <h3>GitHub Integration</h3>
+        <p class="hint">Required for adding/removing flights from this interface. Your token is stored in browser localStorage only.</p>
+        <div class="form-group">
+          <label>Personal Access Token (PAT)</label>
+          <input type="password" id="github-token" placeholder="ghp_...">
+          <small>Create at GitHub → Settings → Developer settings → Tokens (classic), needs <code>repo</code> scope</small>
+        </div>
+        <div class="form-group">
+          <label>Repository</label>
+          <input type="text" id="github-repo" placeholder="MDJimmyFu/flighty-private">
+        </div>
+        <div class="form-group">
+          <label>Branch</label>
+          <input type="text" id="github-branch" placeholder="main">
+        </div>
+        <button class="btn-primary" id="btn-save-github">Save &amp; Test</button>
+        <span class="save-status" id="github-status"></span>
+      </div>
+
+      <div class="card">
+        <h3>Push Notifications (ntfy.sh)</h3>
+        <p class="hint">
+          Install the <strong>ntfy</strong> app on your phone and subscribe to your topic below.<br>
+          Set the same topic as <code>NTFY_TOPIC</code> in your GitHub repository Secrets.
+        </p>
+        <div class="form-group">
+          <label>ntfy Topic (keep this private)</label>
+          <div class="input-row">
+            <input type="text" id="ntfy-topic" placeholder="e.g. flighty-abc123xyz">
+            <button class="btn-icon" id="btn-gen-topic" title="Generate random topic">🎲</button>
+          </div>
+          <small>Subscribe URL: <code id="ntfy-subscribe-url">https://ntfy.sh/your-topic</code></small>
+        </div>
+        <div class="form-actions">
+          <button class="btn-primary" id="btn-save-ntfy">Save</button>
+          <button class="btn-secondary" id="btn-test-ntfy">Test Notification</button>
+        </div>
+        <span class="save-status" id="ntfy-status"></span>
+      </div>
+
+      <div class="card">
+        <h3>AviationStack API (Optional)</h3>
+        <p class="hint">
+          Enables auto-lookup of flight info (times, aircraft, airline) when adding flights.<br>
+          Free tier: 1,000 calls/month. <a href="https://aviationstack.com" target="_blank">Get free key →</a>
+        </p>
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" id="aviationstack-key" placeholder="Your AviationStack API key">
+          <small>Also set this as <code>AVIATIONSTACK_KEY</code> in GitHub Secrets for automatic updates</small>
+        </div>
+        <button class="btn-primary" id="btn-save-as">Save</button>
+        <span class="save-status" id="as-status"></span>
+      </div>
+
+      <div class="card">
+        <h3>Data Management</h3>
+        <div class="form-actions">
+          <button class="btn-secondary" id="btn-export">Export All Data (JSON)</button>
+          <button class="btn-danger" id="btn-clear-settings">Clear All Settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Flight detail modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <button class="modal-close" id="modal-close">✕</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/charts.js"></script>
+</body>
+</html>
