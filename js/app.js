@@ -506,6 +506,7 @@ async function addFlight(e) {
 
     toast(`✓ Added ${flightNum} — GitHub Actions will fetch data within 5 minutes`);
     el('add-flight-form').reset();
+    clearLookupStatus();
     switchTab('dashboard');
     renderDashboard();
   } catch (err) {
@@ -513,42 +514,140 @@ async function addFlight(e) {
   }
 }
 
-/* ===== Auto-lookup via AviationStack ===== */
-async function lookupFlight() {
+/* ===== Flight Lookup ===== */
+
+let _lookupTimer = null;
+
+function setLookupStatus(type, html) {
+  const s = el('lookup-status');
+  s.className = `lookup-status ${type}`;
+  s.innerHTML = html;
+  s.classList.remove('hidden');
+}
+function clearLookupStatus() {
+  el('lookup-status').classList.add('hidden');
+  hide('lookup-options');
+}
+
+/** Called automatically when flight number + date are both filled */
+function scheduleAutoLookup() {
+  clearTimeout(_lookupTimer);
+  const num  = el('flight-number').value.trim();
+  const date = el('flight-date').value;
+  // Need at least "XX0" (prefix + 1 digit) and a date
+  if (!date || !/^[A-Za-z]{1,3}\d{1,4}$/.test(num)) return;
+  _lookupTimer = setTimeout(() => doLookup(num.toUpperCase(), date), 700);
+}
+
+async function doLookup(flightNum, date) {
   const key = getSetting('aviationstackKey');
-  if (!key) { toast('Add AviationStack API key in Settings first'); return; }
-
-  const flightNum = el('flight-number').value.trim().toUpperCase();
-  const date      = el('flight-date').value;
-  if (!flightNum) { toast('Enter flight number first'); return; }
-
-  toast('🔍 Looking up...');
-  try {
-    const url = `http://api.aviationstack.com/v1/flights?access_key=${key}&flight_iata=${flightNum}${date ? '&flight_date=' + date : ''}`;
-    const r = await fetch(url);
-    const data = await r.json();
-    const f = data.data?.[0];
-    if (!f) { toast('Flight not found'); return; }
-
-    // Fill form
-    el('airline').value = f.airline?.name || '';
-    el('aircraft-type').value = f.aircraft?.iata || '';
-    if (f.departure?.iata) el('origin').value = f.departure.iata;
-    if (f.arrival?.iata)   el('destination').value = f.arrival.iata;
-    if (f.departure?.scheduled) el('sched-dep').value = toLocalDatetimeInput(f.departure.scheduled);
-    if (f.arrival?.scheduled)   el('sched-arr').value = toLocalDatetimeInput(f.arrival.scheduled);
-
-    show('lookup-result');
-    el('lookup-result-content').innerHTML = `
-      <p><strong>${f.flight?.iata}</strong> — ${f.airline?.name}</p>
-      <p>${f.departure?.iata} → ${f.arrival?.iata}</p>
-      <p>Dep: ${fmtTime(f.departure?.scheduled)} | Arr: ${fmtTime(f.arrival?.scheduled)}</p>
-      <p>Aircraft: ${f.aircraft?.iata || '—'}</p>
-      <p>Status: ${f.flight_status || '—'}</p>`;
-    toast('✓ Data filled from AviationStack');
-  } catch (e) {
-    toast('⚠️ Lookup failed: ' + e.message);
+  if (!key) {
+    setLookupStatus('error',
+      '⚠️ No AviationStack key — fill in departure/arrival manually, or add a key in Settings.');
+    return;
   }
+
+  setLookupStatus('loading',
+    `<span class="lookup-spinner"></span> Looking up ${flightNum} on ${date}…`);
+  hide('lookup-options');
+
+  try {
+    const url = `https://api.aviationstack.com/v1/flights?access_key=${key}&flight_iata=${flightNum}&flight_date=${date}`;
+    const r   = await fetch(url);
+    const data = await r.json();
+
+    if (data.error) {
+      setLookupStatus('error', `⚠️ AviationStack: ${data.error.message || 'API error'}`);
+      return;
+    }
+
+    const flights = (data.data || []).filter(f =>
+      f.departure?.iata && f.arrival?.iata
+    );
+
+    if (flights.length === 0) {
+      setLookupStatus('error', `✕ No schedule found for ${flightNum} on ${date}. Fill in manually.`);
+      return;
+    }
+
+    // Deduplicate by origin→dest route
+    const seen = new Set();
+    const unique = flights.filter(f => {
+      const key = `${f.departure.iata}-${f.arrival.iata}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    if (unique.length === 1) {
+      applyFlightData(unique[0]);
+      setLookupStatus('success', `✓ Auto-filled from AviationStack`);
+    } else {
+      setLookupStatus('success', `✓ Found ${unique.length} routes — select one below`);
+      showLookupOptions(unique);
+    }
+  } catch (e) {
+    setLookupStatus('error', `⚠️ Lookup failed: ${e.message}`);
+  }
+}
+
+function showLookupOptions(flights) {
+  const grid = el('lookup-options-grid');
+  grid.innerHTML = flights.map((f, i) => {
+    const dep = f.departure || {};
+    const arr = f.arrival   || {};
+    const airline  = f.airline?.name  || '';
+    const aircraft = f.aircraft?.iata || '';
+    const depTime  = dep.scheduled ? fmtTime(dep.scheduled) : '—';
+    const arrTime  = arr.scheduled ? fmtTime(arr.scheduled) : '—';
+    const depName  = dep.airport ? `<span>${dep.airport}</span>` : '';
+    const arrName  = arr.airport ? `<span>${arr.airport}</span>` : '';
+    return `
+<div class="lookup-option-card" id="opt-${i}" onclick="selectLookupOption(${i})">
+  <div class="lookup-option-route">${dep.iata} → ${arr.iata}</div>
+  <div class="lookup-option-times">${depTime} → ${arrTime}</div>
+  <div class="lookup-option-meta">
+    ${airline ? `<span>${airline}</span>` : ''}
+    ${aircraft ? `<span>${aircraft}</span>` : ''}
+    ${depName}${arrName ? ` → ${arrName}` : ''}
+  </div>
+</div>`;
+  }).join('');
+  // Store flights for later selection
+  el('lookup-options-grid').dataset.flights = JSON.stringify(flights);
+  show('lookup-options');
+}
+
+window.selectLookupOption = function(i) {
+  const flights = JSON.parse(el('lookup-options-grid').dataset.flights || '[]');
+  const f = flights[i];
+  if (!f) return;
+  // Highlight selected
+  document.querySelectorAll('.lookup-option-card').forEach((c, idx) => {
+    c.classList.toggle('selected', idx === i);
+  });
+  applyFlightData(f);
+  setLookupStatus('success', `✓ Route selected: ${f.departure?.iata} → ${f.arrival?.iata}`);
+};
+
+function applyFlightData(f) {
+  const dep = f.departure || {};
+  const arr = f.arrival   || {};
+  if (dep.iata)       el('origin').value       = dep.iata;
+  if (arr.iata)       el('destination').value  = arr.iata;
+  if (dep.scheduled)  el('sched-dep').value    = toLocalDatetimeInput(dep.scheduled);
+  if (arr.scheduled)  el('sched-arr').value    = toLocalDatetimeInput(arr.scheduled);
+  if (f.airline?.name)  el('airline').value       = f.airline.name;
+  if (f.aircraft?.iata) el('aircraft-type').value = f.aircraft.iata;
+}
+
+/** Manual lookup button */
+async function lookupFlight() {
+  const num  = el('flight-number').value.trim().toUpperCase();
+  const date = el('flight-date').value;
+  if (!num)  { toast('Enter a flight number first'); return; }
+  if (!date) { toast('Select a date first'); return; }
+  await doLookup(num, date);
 }
 
 function toLocalDatetimeInput(isoStr) {
@@ -645,7 +744,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Add flight form
   el('add-flight-form').addEventListener('submit', addFlight);
   el('btn-lookup').addEventListener('click', lookupFlight);
-  el('btn-use-lookup').addEventListener('click', () => hide('lookup-result'));
+  // Auto-lookup when flight number + date are both filled
+  el('flight-number').addEventListener('input', scheduleAutoLookup);
+  el('flight-date').addEventListener('change', scheduleAutoLookup);
+  // Clear lookup state when flight number is cleared
+  el('flight-number').addEventListener('input', () => {
+    if (!el('flight-number').value.trim()) clearLookupStatus();
+  });
 
   // History filters
   el('history-filter-airline').addEventListener('change', renderHistory);

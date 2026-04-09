@@ -50,6 +50,7 @@
       <h2>Add Flight</h2>
       <div class="card">
         <form id="add-flight-form">
+          <!-- Step 1: Flight number + date (auto-triggers lookup) -->
           <div class="form-row">
             <div class="form-group">
               <label>Flight Number <span class="required">*</span></label>
@@ -60,46 +61,55 @@
               <input type="date" id="flight-date" required>
             </div>
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Origin (IATA) <span class="required">*</span></label>
-              <input type="text" id="origin" placeholder="TPE" maxlength="3" required autocomplete="off" style="text-transform:uppercase">
+
+          <!-- Lookup status bar -->
+          <div id="lookup-status" class="lookup-status hidden"></div>
+
+          <!-- Flight options (shown when multiple routes found) -->
+          <div id="lookup-options" class="hidden">
+            <div class="lookup-options-label">Multiple routes found — select one:</div>
+            <div id="lookup-options-grid" class="lookup-options-grid"></div>
+          </div>
+
+          <!-- Step 2: Detail fields (auto-filled, or manual) -->
+          <div id="flight-detail-fields">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Origin (IATA) <span class="required">*</span></label>
+                <input type="text" id="origin" placeholder="TPE" maxlength="3" required autocomplete="off" style="text-transform:uppercase">
+              </div>
+              <div class="form-group">
+                <label>Destination (IATA) <span class="required">*</span></label>
+                <input type="text" id="destination" placeholder="NRT" maxlength="3" required autocomplete="off" style="text-transform:uppercase">
+              </div>
             </div>
-            <div class="form-group">
-              <label>Destination (IATA) <span class="required">*</span></label>
-              <input type="text" id="destination" placeholder="NRT" maxlength="3" required autocomplete="off" style="text-transform:uppercase">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Scheduled Departure</label>
+                <input type="datetime-local" id="sched-dep">
+              </div>
+              <div class="form-group">
+                <label>Scheduled Arrival</label>
+                <input type="datetime-local" id="sched-arr">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Airline</label>
+                <input type="text" id="airline" placeholder="China Airlines">
+              </div>
+              <div class="form-group">
+                <label>Aircraft Type</label>
+                <input type="text" id="aircraft-type" placeholder="A359">
+              </div>
             </div>
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Scheduled Departure</label>
-              <input type="datetime-local" id="sched-dep">
-            </div>
-            <div class="form-group">
-              <label>Scheduled Arrival</label>
-              <input type="datetime-local" id="sched-arr">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Airline</label>
-              <input type="text" id="airline" placeholder="China Airlines">
-            </div>
-            <div class="form-group">
-              <label>Aircraft Type</label>
-              <input type="text" id="aircraft-type" placeholder="A359">
-            </div>
-          </div>
+
           <div class="form-actions">
-            <button type="button" class="btn-secondary" id="btn-lookup">🔍 Auto Lookup</button>
+            <button type="button" class="btn-secondary" id="btn-lookup">🔍 Lookup</button>
             <button type="submit" class="btn-primary">Add Flight</button>
           </div>
         </form>
-      </div>
-      <div id="lookup-result" class="card hidden">
-        <h4>Lookup Result</h4>
-        <div id="lookup-result-content"></div>
-        <button class="btn-primary" id="btn-use-lookup">Use This Data</button>
       </div>
     </div>
   </div>

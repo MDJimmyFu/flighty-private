@@ -512,6 +512,81 @@ small { font-size: 0.78rem; color: var(--text2); }
 }
 .btn-secondary:hover { background: var(--card2); }
 
+/* ── Flight Lookup UI ── */
+.lookup-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  margin-bottom: 14px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+}
+.lookup-status.loading { color: var(--blue); border-color: rgba(79,156,249,0.3); }
+.lookup-status.success { color: var(--green); border-color: rgba(34,211,160,0.3); }
+.lookup-status.error   { color: var(--yellow); border-color: rgba(245,158,11,0.3); }
+.lookup-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.lookup-options-label {
+  font-size: 0.82rem;
+  color: var(--text2);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+.lookup-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.lookup-option-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.12s;
+}
+.lookup-option-card:hover {
+  border-color: var(--blue);
+  background: var(--card2);
+  transform: translateY(-1px);
+}
+.lookup-option-card.selected {
+  border-color: var(--green);
+  background: rgba(34,211,160,0.07);
+}
+.lookup-option-route {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.lookup-option-times {
+  font-size: 0.85rem;
+  color: var(--blue);
+  margin-bottom: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.lookup-option-meta {
+  font-size: 0.78rem;
+  color: var(--text2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .btn-danger {
   background: rgba(244,63,94,0.12);
   color: var(--red);
