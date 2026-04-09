@@ -382,9 +382,12 @@ def main():
         f_hours_str = f"{f_hours:.1f}h" if f_hours is not None else "?"
         print(f"\n{flight_iata} ({flight_date}): phase={f_phase}, {f_hours_str} until dep")
 
-        # ── AviationStack: only if this flight's own interval has elapsed ──
-        if api_key and should_fetch_as(f_meta, f_as_interval):
-            print(f"  → AviationStack call (interval={f_as_interval}min)")
+        # ── AviationStack: only in weekly/daily phase (schedule still may change) ──
+        # During hourly/5-min phase, the schedule is fixed — OpenSky handles live data.
+        # Free plan: 100 req/month. We conserve by skipping AS when airborne/near departure.
+        AS_USEFUL_PHASES = {"weekly", "daily", "monthly"}
+        if api_key and f_phase in AS_USEFUL_PHASES and should_fetch_as(f_meta, f_as_interval):
+            print(f"  → AviationStack call (phase={f_phase}, interval={f_as_interval}min)")
             as_data = aviationstack_flight(flight_iata, flight_date, api_key)
             if as_data:
                 current = apply_aviationstack(current, as_data)
@@ -396,6 +399,8 @@ def main():
                 "phase": f_phase,
                 "as_interval_min": f_as_interval,
             }
+        elif f_phase not in AS_USEFUL_PHASES:
+            print(f"  → Skipping AviationStack (phase={f_phase}, using OpenSky only)")
         else:
             next_as = parse_dt(f_meta.get("last_as_fetch_at", ""))
             next_due = ""
