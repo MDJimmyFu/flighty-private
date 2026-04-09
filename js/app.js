@@ -111,10 +111,33 @@ async function fetchRaw(path) {
   }
 }
 
+/* ===== Local cache helpers ===== */
+const CACHE_KEYS = {
+  tracked: 'flighty_cache_tracked',
+  flights: 'flighty_cache_flights',
+  history: 'flighty_cache_history',
+};
+function saveCache(key, data) {
+  try { localStorage.setItem(CACHE_KEYS[key], JSON.stringify(data)); } catch {}
+}
+function loadCache(key) {
+  try { return JSON.parse(localStorage.getItem(CACHE_KEYS[key])) || null; } catch { return null; }
+}
+
 /* ===== Load flight data ===== */
 async function loadData() {
   const btn = el('btn-refresh');
   btn.classList.add('spinning');
+
+  // Restore from cache immediately so the UI isn't blank on refresh
+  const cachedTracked = loadCache('tracked');
+  const cachedFlights = loadCache('flights');
+  const cachedHistory = loadCache('history');
+  if (cachedTracked) STATE.tracked = cachedTracked;
+  if (cachedFlights) STATE.flights = cachedFlights;
+  if (cachedHistory) STATE.history = cachedHistory;
+  if (cachedTracked || cachedFlights) renderDashboard();
+
   try {
     const [statusResult, historyResult, trackedResult] = await Promise.allSettled([
       fetchRaw('data/status.json'),
@@ -124,6 +147,7 @@ async function loadData() {
 
     if (statusResult.status === 'fulfilled') {
       STATE.flights = statusResult.value.data.flights || [];
+      saveCache('flights', STATE.flights);
       const upd = statusResult.value.data.updated_at;
       if (upd) el('last-updated').textContent = 'Updated ' + timeAgo(upd);
     }
@@ -140,14 +164,16 @@ async function loadData() {
         'no-flights': '💤 Standby',
       };
       const label = phaseLabel[meta.phase] || meta.phase;
-      const next  = meta.next_fetch_at ? ' · next ' + timeAgo(meta.next_fetch_at).replace(' ago','') : '';
       el('last-updated').textContent = (el('last-updated').textContent || '') + `  ${label}`;
     } catch { /* meta not yet available */ }
+
     if (historyResult.status === 'fulfilled') {
       STATE.history = historyResult.value.data.flights || [];
+      saveCache('history', STATE.history);
     }
     if (trackedResult.status === 'fulfilled') {
       STATE.tracked = trackedResult.value.data.tracked || [];
+      saveCache('tracked', STATE.tracked);
     }
 
     renderDashboard();
@@ -366,6 +392,8 @@ async function removeFlight(id) {
     await ghPutFile('flights.json', decoded, f.sha, `Remove flight`);
     STATE.tracked = decoded.tracked;
     STATE.flights = STATE.flights.filter(f => f.id !== id);
+    saveCache('tracked', STATE.tracked);
+    saveCache('flights', STATE.flights);
     renderDashboard();
     toast('✓ Flight removed');
   } catch (e) {
@@ -504,6 +532,7 @@ async function addFlight(e) {
 
     await ghPutFile('flights.json', current, sha, `Add flight ${flightNum} on ${date}`);
     STATE.tracked.push(newFlight);
+    saveCache('tracked', STATE.tracked);
 
     toast(`✓ Added ${flightNum} — GitHub Actions will fetch data within 5 minutes`);
     el('add-flight-form').reset();
@@ -819,11 +848,33 @@ document.addEventListener('DOMContentLoaded', () => {
   el('history-filter-airline').addEventListener('change', renderHistory);
   el('history-filter-year').addEventListener('change', renderHistory);
 
-  // Settings
+  // Settings — auto-save on input so refreshing never loses data
+  function autoSave(inputId, settingKey, statusId) {
+    const input = el(inputId);
+    let timer;
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        saveSettings({ [settingKey]: input.value.trim() });
+        if (statusId) {
+          const s = el(statusId);
+          s.textContent = '✓ Saved';
+          setTimeout(() => { s.textContent = ''; }, 1500);
+        }
+      }, 600);
+    });
+  }
+  autoSave('github-token',    'githubToken',      null);
+  autoSave('github-repo',     'githubRepo',       null);
+  autoSave('github-branch',   'githubBranch',     null);
+  autoSave('ntfy-topic',      'ntfyTopic',        'ntfy-status');
+  autoSave('aerodatabox-key', 'aeroDataBoxKey',   'adb-status');
+  autoSave('aviationstack-key','aviationstackKey', 'as-status');
+
+  // Keep Save buttons for explicit confirm + GitHub connectivity test
   el('btn-save-github').addEventListener('click', testGitHub);
   el('btn-save-ntfy').addEventListener('click', () => {
-    const t = el('ntfy-topic').value.trim();
-    saveSettings({ ntfyTopic: t });
+    saveSettings({ ntfyTopic: el('ntfy-topic').value.trim() });
     el('ntfy-status').textContent = '✓ Saved';
     setTimeout(() => el('ntfy-status').textContent = '', 2000);
   });
