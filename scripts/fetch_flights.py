@@ -255,6 +255,59 @@ def fetch_opensky_states():
         return []
 
 
+def fetch_opensky_flight_info(icao24, flight_date):
+    """
+    Fallback (no AviationStack): query OpenSky historical flights API for
+    actual departure/arrival timestamps using the aircraft's icao24 address.
+    Returns the first matching flight record or None.
+    """
+    try:
+        day   = datetime.strptime(flight_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        begin = int((day - timedelta(hours=3)).timestamp())
+        end   = int((day + timedelta(hours=30)).timestamp())
+        r = requests.get(
+            "https://opensky-network.org/api/flights/aircraft",
+            params={"icao24": icao24.lower(), "begin": begin, "end": end},
+            timeout=15,
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        flights = r.json() or []
+        return flights[0] if flights else None
+    except Exception as e:
+        print(f"  OpenSky flights/aircraft error: {e}")
+        return None
+
+
+def apply_opensky_flight_info(current, osk):
+    """
+    Merge OpenSky historical flight data into current flight dict.
+    Provides actual departure/arrival times and infers status/delays.
+    """
+    if not osk:
+        return current
+    first = osk.get("firstSeen")   # unix timestamp of wheels-up
+    last  = osk.get("lastSeen")    # unix timestamp of wheels-down
+    if first:
+        current["actual_departure"] = datetime.fromtimestamp(first, tz=timezone.utc).isoformat()
+        if (current.get("status") or "scheduled") == "scheduled":
+            current["status"] = "active"
+    if last and first and (last - first) > 600:   # at least 10-min flight
+        current["actual_arrival"] = datetime.fromtimestamp(last, tz=timezone.utc).isoformat()
+        current["status"] = "landed"
+    # Recompute delays from actual vs scheduled times
+    if current.get("actual_departure") and current.get("scheduled_departure"):
+        d = delay_min(current["scheduled_departure"], current["actual_departure"])
+        if d is not None:
+            current["delay_departure"] = max(0, d)
+    if current.get("actual_arrival") and current.get("scheduled_arrival"):
+        d = delay_min(current["scheduled_arrival"], current["actual_arrival"])
+        if d is not None:
+            current["delay_arrival"] = max(0, d)
+    return current
+
+
 def find_in_states(states, callsign):
     """Search pre-fetched OpenSky states for a specific callsign."""
     target = callsign.strip().upper()
@@ -385,6 +438,7 @@ def main():
         # ── AviationStack: only in weekly/daily phase (schedule still may change) ──
         # During hourly/5-min phase, the schedule is fixed — OpenSky handles live data.
         # Free plan: 100 req/month. We conserve by skipping AS when airborne/near departure.
+        # When no AS key, we fall back to OpenSky's historical flights API (see below).
         AS_USEFUL_PHASES = {"weekly", "daily", "monthly"}
         if api_key and f_phase in AS_USEFUL_PHASES and should_fetch_as(f_meta, f_as_interval):
             print(f"  → AviationStack call (phase={f_phase}, interval={f_as_interval}min)")
@@ -409,7 +463,7 @@ def main():
                 next_due = f" (next AS due {due.strftime('%H:%M')} UTC)"
             print(f"  → Skipping AviationStack{next_due}")
 
-        # ── OpenSky: one global call shared across all flights ──
+        # ── OpenSky live: one global call shared across all flights ──
         status = (current.get("status") or "").lower()
         if status not in ("landed", "cancelled", "diverted"):
             # Load OpenSky states once for all flights
@@ -431,6 +485,24 @@ def main():
                 current["live"] = None
         else:
             current["live"] = None
+
+        # ── OpenSky fallback: get actual dep/arr times when no AviationStack ──
+        # OpenSky /flights/aircraft returns firstSeen/lastSeen timestamps for a
+        # given icao24 address — enough to compute actual times and delays.
+        if not api_key and flight_date:
+            # icao24 is available from current live state, or stored from a prior run
+            icao24 = (current.get("live") or {}).get("icao24") or \
+                     (old_map.get(flight_id, {}).get("live") or {}).get("icao24")
+            if icao24:
+                print(f"  → OpenSky flight-info fallback (icao24={icao24})")
+                osk_info = fetch_opensky_flight_info(icao24, flight_date)
+                if osk_info:
+                    current = apply_opensky_flight_info(current, osk_info)
+                    print(f"    status={current.get('status')} "
+                          f"dep_delay={current.get('delay_departure', 0)}min "
+                          f"arr_delay={current.get('delay_arrival', 0)}min")
+                else:
+                    print(f"    No historical data yet (flight may not have departed)")
 
         # ── Notifications ──
         old       = old_map.get(flight_id, {})
