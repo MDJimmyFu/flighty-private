@@ -1,3 +1,28 @@
 {
-  "flights": []
+  "flights": [
+    {
+      "id": "JL99-2026-04-08-1776328806159",
+      "flight_number": "JL99",
+      "date": "2026-04-08",
+      "airline": "JAL",
+      "airline_iata": "JL",
+      "aircraft_type": "Boeing 787-9",
+      "origin": {
+        "iata": "HND",
+        "name": "Tokyo Haneda"
+      },
+      "destination": {
+        "iata": "TSA",
+        "name": "Taipei City Taipei Songshan"
+      },
+      "scheduled_departure": "2026-04-08T09:25+00:00",
+      "scheduled_arrival": "2026-04-08T12:50+00:00",
+      "actual_departure": null,
+      "actual_arrival": null,
+      "status": "landed",
+      "delay_departure": 0,
+      "delay_arrival": 0,
+      "aircraft_registration": "JA877J"
+    }
+  ]
 }
