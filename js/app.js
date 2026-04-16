@@ -68,11 +68,36 @@ function ghRepo() { return getSetting('githubRepo') || 'MDJimmyFu/flighty-privat
 function ghBranch() { return getSetting('githubBranch') || 'main'; }
 
 async function ghGetFile(path) {
-  const url = `https://api.github.com/repos/${ghRepo()}/contents/${path}?ref=${ghBranch()}`;
-  const r = await fetch(url, { headers: ghHeaders() });
+  // t= busts GitHub's CDN cache so we always get the current SHA
+  const url = `https://api.github.com/repos/${ghRepo()}/contents/${path}?ref=${ghBranch()}&t=${Date.now()}`;
+  const r = await fetch(url, { headers: { ...ghHeaders(), 'Cache-Control': 'no-cache' } });
   if (!r.ok) throw new Error(`GitHub ${r.status}: ${path}`);
   return r.json();
 }
+/**
+ * Read-modify-write a JSON file on GitHub with automatic SHA-conflict retry.
+ * updateFn receives the current parsed content and returns the new content.
+ */
+async function ghUpdateFile(path, updateFn, message) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let sha = null, current = null;
+    try {
+      const f = await ghGetFile(path);
+      sha     = f.sha;
+      current = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, '')))));
+    } catch {
+      current = null; // file doesn't exist yet
+    }
+    const updated = updateFn(current);
+    try {
+      return await ghPutFile(path, updated, sha, message);
+    } catch (e) {
+      if (attempt === 0 && e.message.includes('does not match')) continue; // retry
+      throw e;
+    }
+  }
+}
+
 async function ghPutFile(path, content, sha, message) {
   const url = `https://api.github.com/repos/${ghRepo()}/contents/${path}`;
   const body = {
@@ -484,12 +509,14 @@ async function removeFlight(id) {
     return;
   }
   try {
-    const f = await ghGetFile('flights.json');
-    const decoded = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, '')))));
-    decoded.tracked = decoded.tracked.filter(t => t.id !== id);
-    await ghPutFile('flights.json', decoded, f.sha, `Remove flight`);
-    STATE.tracked = decoded.tracked;
-    STATE.flights = STATE.flights.filter(f => f.id !== id);
+    let newTracked;
+    await ghUpdateFile(
+      'flights.json',
+      cur => { const c = cur || { tracked: [] }; c.tracked = (c.tracked || []).filter(t => t.id !== id); newTracked = c.tracked; return c; },
+      `Remove flight`
+    );
+    STATE.tracked = newTracked;
+    STATE.flights  = STATE.flights.filter(f => f.id !== id);
     saveCache('tracked', STATE.tracked);
     saveCache('flights', STATE.flights);
     renderDashboard();
@@ -618,17 +645,11 @@ async function addFlight(e) {
   };
 
   try {
-    let sha = null, current = { tracked: [] };
-    try {
-      const f = await ghGetFile('flights.json');
-      sha = f.sha;
-      current = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, '')))));
-    } catch { /* file may not exist yet */ }
-
-    current.tracked = current.tracked || [];
-    current.tracked.push(newFlight);
-
-    await ghPutFile('flights.json', current, sha, `Add flight ${flightNum} on ${date}`);
+    await ghUpdateFile(
+      'flights.json',
+      cur => { const c = cur || { tracked: [] }; c.tracked = c.tracked || []; c.tracked.push(newFlight); return c; },
+      `Add flight ${flightNum} on ${date}`
+    );
     STATE.tracked.push(newFlight);
     saveCache('tracked', STATE.tracked);
 
