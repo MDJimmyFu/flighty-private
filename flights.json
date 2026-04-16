@@ -1,16 +1,3 @@
 {
-  "tracked": [
-    {
-      "id": "JL99-2026-05-16-1775724256211",
-      "flight_number": "JL99",
-      "date": "2026-05-16",
-      "origin": "HND",
-      "destination": "TSA",
-      "airline": "",
-      "aircraft_type": "",
-      "scheduled_departure": "",
-      "scheduled_arrival": "",
-      "added_at": "2026-04-09T08:44:16.211Z"
-    }
-  ]
+  "tracked": []
 }
