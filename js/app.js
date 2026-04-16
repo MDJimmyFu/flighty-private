@@ -6,6 +6,8 @@ const STATE = {
   settings: {},
   charts: {},
   maps: {},
+  weather: {},   // icao → metar data (30-min in-memory cache)
+  weatherTs: {}, // icao → fetch timestamp
   refreshTimer: null,
 };
 
@@ -109,6 +111,77 @@ async function fetchRaw(path) {
     if (!r.ok) throw new Error(`Failed to fetch ${path}`);
     return { data: await r.json(), sha: null };
   }
+}
+
+/* ===== AviationWeather (NOAA) — free, no API key ===== */
+
+const WEATHER_CACHE_MS = 30 * 60 * 1000; // 30 minutes
+
+const SKY_ICON = { CLR: '☀️', SKC: '☀️', CAVOK: '☀️', FEW: '🌤', SCT: '⛅', BKN: '🌥', OVC: '☁️' };
+const FLTCAT_COLOR = { VFR: '#22d3a0', MVFR: '#4f9cf9', IFR: '#f43f5e', LIFR: '#a78bfa' };
+
+function windDir(deg) {
+  if (deg === null || deg === undefined) return '—';
+  const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+function fmtMetar(m) {
+  if (!m) return null;
+  const icon  = SKY_ICON[m.cover] || '🌡';
+  const temp  = m.temp != null ? `${m.temp}°C` : '';
+  const wind  = m.wspd != null ? `${windDir(m.wdir)} ${m.wspd}kt` : '';
+  const vis   = m.visib ? (m.visib === '6+' || parseFloat(m.visib) >= 6 ? '' : `vis ${m.visib}SM`) : '';
+  const cat   = m.fltCat || '';
+  return { icon, temp, wind, vis, cat, color: FLTCAT_COLOR[cat] || '#8899b4' };
+}
+
+async function fetchWeather(icaoCodes) {
+  // Remove codes already cached and fresh
+  const now = Date.now();
+  const toFetch = icaoCodes.filter(c => c && (!STATE.weatherTs[c] || now - STATE.weatherTs[c] > WEATHER_CACHE_MS));
+  if (toFetch.length === 0) return;
+
+  try {
+    const ids = toFetch.join(',');
+    const r = await fetch(`https://aviationweather.gov/api/data/metar?ids=${ids}&format=json`);
+    if (!r.ok) return;
+    const data = await r.json();
+    for (const m of data) {
+      STATE.weather[m.icaoId]   = m;
+      STATE.weatherTs[m.icaoId] = now;
+    }
+  } catch { /* weather is non-critical */ }
+}
+
+function weatherBadge(iata) {
+  const icao = iataToIcaoAirport(iata);
+  if (!icao) return '';
+  const m = STATE.weather[icao];
+  if (!m) return `<span class="wx-loading" data-icao="${icao}">…</span>`;
+  const w = fmtMetar(m);
+  return `
+<div class="wx-badge">
+  <span class="wx-icon">${w.icon}</span>
+  <span class="wx-temp">${w.temp}</span>
+  <span class="wx-wind">${w.wind}</span>
+  ${w.vis ? `<span class="wx-vis">${w.vis}</span>` : ''}
+  ${w.cat ? `<span class="wx-cat" style="color:${w.color}">${w.cat}</span>` : ''}
+</div>`;
+}
+
+async function loadWeatherForFlights(flights) {
+  const icaos = [];
+  for (const f of flights) {
+    const depIata = f.origin?.iata || f.origin;
+    const arrIata = f.destination?.iata || f.destination;
+    const depIcao = iataToIcaoAirport(depIata);
+    const arrIcao = iataToIcaoAirport(arrIata);
+    if (depIcao) icaos.push(depIcao);
+    if (arrIcao) icaos.push(arrIcao);
+  }
+  if (icaos.length === 0) return;
+  await fetchWeather([...new Set(icaos)]);
 }
 
 /* ===== Local cache helpers ===== */
@@ -275,6 +348,28 @@ function renderDashboard() {
       initMiniMap(f);
     }
   }
+
+  // Load weather in background, then re-render cards with weather data
+  loadWeatherForFlights(allFlights).then(() => {
+    for (const f of allFlights) {
+      const card = document.getElementById(`card-${f.id}`);
+      if (!card) continue;
+      const depIata = f.origin?.iata || f.origin || '';
+      const arrIata = f.destination?.iata || f.destination || '';
+      card.querySelectorAll('.wx-loading').forEach(el => {
+        const icao = el.dataset.icao;
+        const m = STATE.weather[icao];
+        if (m) el.outerHTML = weatherBadge(
+          Object.keys(IATA_TO_ICAO_AIRPORT).find(k => IATA_TO_ICAO_AIRPORT[k] === icao) || ''
+        );
+      });
+      // Also fill if wx-dep / wx-arr placeholders exist
+      const wxDep = card.querySelector('.wx-dep');
+      const wxArr = card.querySelector('.wx-arr');
+      if (wxDep) wxDep.innerHTML = weatherBadge(depIata);
+      if (wxArr) wxArr.innerHTML = weatherBadge(arrIata);
+    }
+  });
 }
 
 function renderFlightCard(f) {
@@ -301,11 +396,13 @@ function renderFlightCard(f) {
     <div class="route-airport">
       <div class="route-iata">${origin}</div>
       <div class="route-name" title="${originName}">${originName || 'Origin'}</div>
+      <div class="wx-dep">${weatherBadge(origin)}</div>
     </div>
     <div class="route-line"><span class="route-plane">✈</span></div>
     <div class="route-airport">
       <div class="route-iata">${dest}</div>
       <div class="route-name" title="${destName}">${destName || 'Destination'}</div>
+      <div class="wx-arr">${weatherBadge(dest)}</div>
     </div>
   </div>
 

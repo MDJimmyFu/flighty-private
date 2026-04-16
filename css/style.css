@@ -512,6 +512,24 @@ small { font-size: 0.78rem; color: var(--text2); }
 }
 .btn-secondary:hover { background: var(--card2); }
 
+/* ── Airport Weather (NOAA AviationWeather) ── */
+.wx-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+  font-size: 0.75rem;
+  color: var(--text2);
+  line-height: 1.2;
+}
+.wx-icon { font-size: 0.9rem; }
+.wx-temp { color: var(--text); font-weight: 600; }
+.wx-wind { color: var(--text2); }
+.wx-vis  { color: var(--yellow); }
+.wx-cat  { font-weight: 700; font-size: 0.7rem; letter-spacing: 0.5px; }
+.wx-loading { color: var(--text3); font-size: 0.72rem; }
+
 /* ── Flight Lookup UI ── */
 .lookup-status {
   display: flex;
