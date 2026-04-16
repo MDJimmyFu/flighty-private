@@ -23,6 +23,18 @@
       "scheduled_departure": "2026-04-08T10:25:00.000Z",
       "scheduled_arrival": "2026-04-08T12:50:00.000Z",
       "added_at": "2026-04-16T08:40:06.159Z"
+    },
+    {
+      "id": "JL5040-2026-03-30-1776330500594",
+      "flight_number": "JL5040",
+      "date": "2026-03-30",
+      "origin": "TPE",
+      "destination": "NRT",
+      "airline": "China Airlines",
+      "aircraft_type": "Airbus A321 NEO",
+      "scheduled_departure": "2026-03-30T08:25:00.000Z",
+      "scheduled_arrival": "2026-03-30T12:50:00.000Z",
+      "added_at": "2026-04-16T09:08:20.594Z"
     }
   ]
 }
