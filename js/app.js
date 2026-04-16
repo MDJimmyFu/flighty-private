@@ -1,3 +1,6 @@
+/* ===== Version ===== */
+const APP_VERSION = '2025-07-17 03:30 UTC';  // updated each deploy
+
 /* ===== State ===== */
 const STATE = {
   flights: [],   // active flights (from data/status.json)
@@ -58,20 +61,29 @@ function switchTab(name) {
 }
 
 /* ===== GitHub API ===== */
-function ghHeaders() {
+// Read headers: no Content-Type (GET has no body; including it forces a CORS preflight
+// that may fail if the host doesn't explicitly allow it).
+function ghReadHeaders() {
   const token = getSetting('githubToken');
-  const h = { 'Content-Type': 'application/json', Accept: 'application/vnd.github.v3+json' };
+  const h = { Accept: 'application/vnd.github.v3+json' };
   if (token) h.Authorization = `token ${token}`;
   return h;
 }
-function ghRepo() { return getSetting('githubRepo') || 'MDJimmyFu/flighty-private'; }
+// Write headers: Content-Type needed for JSON body in PUT requests.
+function ghWriteHeaders() {
+  return { ...ghReadHeaders(), 'Content-Type': 'application/json' };
+}
+function ghRepo()   { return getSetting('githubRepo')   || 'MDJimmyFu/flighty-private'; }
 function ghBranch() { return getSetting('githubBranch') || 'main'; }
 
 async function ghGetFile(path) {
-  // t= busts GitHub's CDN cache so we always get the current SHA
-  // (Cache-Control request header omitted — not in GitHub's CORS allow-list, causes preflight failure)
   const url = `https://api.github.com/repos/${ghRepo()}/contents/${path}?ref=${ghBranch()}&t=${Date.now()}`;
-  const r = await fetch(url, { headers: ghHeaders() });
+  let r;
+  try {
+    r = await fetch(url, { headers: ghReadHeaders() });
+  } catch (netErr) {
+    throw new Error(`Network error reading ${path} — check your connection (${netErr.message})`);
+  }
   if (!r.ok) throw new Error(`GitHub ${r.status}: ${path}`);
   return r.json();
 }
@@ -132,7 +144,12 @@ async function ghPutFile(path, content, sha, message) {
     branch: ghBranch(),
   };
   if (sha) body.sha = sha;
-  const r = await fetch(url, { method: 'PUT', headers: ghHeaders(), body: JSON.stringify(body) });
+  let r;
+  try {
+    r = await fetch(url, { method: 'PUT', headers: ghWriteHeaders(), body: JSON.stringify(body) });
+  } catch (netErr) {
+    throw new Error(`Network error writing ${path} — check your connection (${netErr.message})`);
+  }
   if (!r.ok) {
     const e = await r.json();
     const msg = e.message || String(r.status);
@@ -760,8 +777,25 @@ function modeOf(arr) {
 /* ===== Add Flight ===== */
 async function addFlight(e) {
   e.preventDefault();
-  if (!getSetting('githubToken')) {
+  const token = getSetting('githubToken');
+  if (!token) {
     toast('⚠️ Set your GitHub token in Settings first');
+    return;
+  }
+  // Quick pre-flight check: verify repo is reachable before building the payload
+  try {
+    const testUrl = `https://api.github.com/repos/${ghRepo()}`;
+    const tr = await fetch(testUrl, { headers: ghReadHeaders() });
+    if (tr.status === 401 || tr.status === 403) {
+      toast('⚠️ GitHub token rejected — check it has "repo" scope in Settings');
+      return;
+    }
+    if (tr.status === 404) {
+      toast(`⚠️ Repo not found: ${ghRepo()} — check Settings`);
+      return;
+    }
+  } catch (netErr) {
+    toast(`⚠️ Cannot reach GitHub — check your connection (${netErr.message})`);
     return;
   }
 
@@ -1182,6 +1216,9 @@ document.addEventListener('DOMContentLoaded', () => {
   el('modal-overlay').addEventListener('click', e => {
     if (e.target === el('modal-overlay')) hide('modal-overlay');
   });
+
+  // Version
+  el('app-version').textContent = APP_VERSION;
 
   // Load data
   renderApiUsage();
