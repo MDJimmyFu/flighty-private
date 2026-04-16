@@ -69,8 +69,9 @@ function ghBranch() { return getSetting('githubBranch') || 'main'; }
 
 async function ghGetFile(path) {
   // t= busts GitHub's CDN cache so we always get the current SHA
+  // (Cache-Control request header omitted — not in GitHub's CORS allow-list, causes preflight failure)
   const url = `https://api.github.com/repos/${ghRepo()}/contents/${path}?ref=${ghBranch()}&t=${Date.now()}`;
-  const r = await fetch(url, { headers: { ...ghHeaders(), 'Cache-Control': 'no-cache' } });
+  const r = await fetch(url, { headers: ghHeaders() });
   if (!r.ok) throw new Error(`GitHub ${r.status}: ${path}`);
   return r.json();
 }
