@@ -513,7 +513,7 @@ small { font-size: 0.78rem; color: var(--text2); }
 .btn-secondary:hover { background: var(--card2); }
 
 /* ── Route Map Tab ── */
-#tab-map {
+#tab-map.active {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 56px);
