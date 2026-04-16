@@ -1,3 +1,16 @@
 {
-  "tracked": []
+  "tracked": [
+    {
+      "id": "JX820-2026-05-16-1776327989145",
+      "flight_number": "JX820",
+      "date": "2026-05-16",
+      "origin": "TPE",
+      "destination": "KIX",
+      "airline": "Starlux Airlines",
+      "aircraft_type": "Airbus A330-900",
+      "scheduled_departure": "2026-05-16T00:30:00.000Z",
+      "scheduled_arrival": "2026-05-16T04:15:00.000Z",
+      "added_at": "2026-04-16T08:26:29.145Z"
+    }
+  ]
 }
