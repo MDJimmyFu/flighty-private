@@ -1,8 +1,8 @@
 {
-  "last_fetch_at": "2026-04-09T08:44:31.982033+00:00",
-  "phase": "monthly",
-  "interval_min": 43200,
-  "next_fetch_at": "2026-05-09T08:44:31.982033+00:00",
-  "nearest_flight_hours": 879.26,
+  "last_fetch_at": "2026-04-16T08:40:19.647730+00:00",
+  "phase": "every-5min",
+  "interval_min": 5,
+  "next_fetch_at": "2026-04-16T08:45:19.647730+00:00",
+  "nearest_flight_hours": 0,
   "flights": {}
 }
