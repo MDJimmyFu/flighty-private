@@ -86,13 +86,16 @@ async function ghUpdateFile(path, updateFn, message) {
       sha     = f.sha;
       current = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, '')))));
     } catch {
-      current = null; // file doesn't exist yet
+      current = null; // file doesn't exist yet, or transient read error — retry will re-fetch
     }
     const updated = updateFn(current);
     try {
       return await ghPutFile(path, updated, sha, message);
     } catch (e) {
-      if (attempt === 0 && e.message.includes('does not match')) continue; // retry
+      const msg = e.message || '';
+      // "does not match" = stale SHA; "wasn't supplied" = ghGetFile failed so sha=null
+      // Both are recoverable by re-fetching the latest SHA on the next attempt
+      if (attempt === 0 && (msg.includes('does not match') || msg.includes("wasn't supplied"))) continue;
       throw e;
     }
   }
