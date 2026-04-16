@@ -16,6 +16,7 @@
     <div class="nav-brand">✈️ <span>My Flights</span></div>
     <div class="nav-tabs" id="nav-tabs">
       <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+      <button class="nav-tab" data-tab="map">Route Map</button>
       <button class="nav-tab" data-tab="add">Add Flight</button>
       <button class="nav-tab" data-tab="history">History</button>
       <button class="nav-tab" data-tab="stats">Statistics</button>
@@ -41,6 +42,20 @@
         <p>Add a flight to start tracking</p>
         <button class="btn-primary" onclick="switchTab('add')">Add Flight</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Route Map -->
+  <div id="tab-map" class="tab-content" style="position:relative;">
+    <div id="route-map"></div>
+    <div class="rm-overlay rm-stats-box">
+      <div id="rm-stats" style="display:flex;gap:20px;"></div>
+    </div>
+    <div class="rm-overlay rm-legend">
+      <div class="rm-legend-item"><div class="rm-legend-line" style="background:#f59e0b"></div>Airborne</div>
+      <div class="rm-legend-item"><div class="rm-legend-line" style="background:#22d3ee;border-top:1px dashed #22d3ee;background:none;border-bottom:none"></div>Scheduled</div>
+      <div class="rm-legend-item"><div class="rm-legend-line" style="background:#4a5c78"></div>Landed</div>
+      <div class="rm-legend-item"><div class="rm-legend-line" style="background:#f43f5e"></div>Cancelled</div>
     </div>
   </div>
 
@@ -286,6 +301,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="js/airports.js"></script>
+  <script src="js/routemap.js"></script>
   <script src="js/app.js"></script>
   <script src="js/charts.js"></script>
 </body>

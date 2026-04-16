@@ -52,8 +52,9 @@ function switchTab(name) {
   el(`tab-${name}`).classList.add('active');
   document.querySelector(`[data-tab="${name}"]`)?.classList.add('active');
   el('nav-tabs').classList.remove('open');
-  if (name === 'stats') renderStats();
-  if (name === 'history') renderHistory();
+  if (name === 'stats')    renderStats();
+  if (name === 'history')  renderHistory();
+  if (name === 'map')      setTimeout(initRouteMap, 50); // after tab is visible
 }
 
 /* ===== GitHub API ===== */
