@@ -707,15 +707,20 @@ async function fetchAeroDataBox(flightNum, date) {
     departure: {
       iata:      f.departure?.airport?.iata,
       airport:   f.departure?.airport?.name,
-      scheduled: adbTime(f.departure?.scheduledTimeUtc),
-      actual:    adbTime(f.departure?.actualTimeUtc),
+      // Prefer local time (airport timezone) → falls back to UTC
+      scheduled: adbTime(f.departure?.scheduledTimeLocal ?? f.departure?.scheduledTimeUtc
+                      ?? f.departure?.scheduledTime?.local ?? f.departure?.scheduledTime?.utc),
+      actual:    adbTime(f.departure?.actualTimeLocal    ?? f.departure?.actualTimeUtc
+                      ?? f.departure?.actualTime?.local  ?? f.departure?.actualTime?.utc),
       delay:     f.departure?.delay ?? null,
     },
     arrival: {
       iata:      f.arrival?.airport?.iata,
       airport:   f.arrival?.airport?.name,
-      scheduled: adbTime(f.arrival?.scheduledTimeUtc),
-      actual:    adbTime(f.arrival?.actualTimeUtc),
+      scheduled: adbTime(f.arrival?.scheduledTimeLocal ?? f.arrival?.scheduledTimeUtc
+                      ?? f.arrival?.scheduledTime?.local ?? f.arrival?.scheduledTime?.utc),
+      actual:    adbTime(f.arrival?.actualTimeLocal    ?? f.arrival?.actualTimeUtc
+                      ?? f.arrival?.actualTime?.local  ?? f.arrival?.actualTime?.utc),
       delay:     f.arrival?.delay ?? null,
     },
     airline:      { name: f.airline?.name, iata: f.airline?.iata },
@@ -725,10 +730,10 @@ async function fetchAeroDataBox(flightNum, date) {
   }));
 }
 
-// AeroDataBox time: "2024-01-15 02:00Z" → ISO string
+// AeroDataBox time: normalize space separator, keep timezone info intact
 function adbTime(t) {
   if (!t) return null;
-  return t.replace(' ', 'T').replace(/Z$/, '+00:00');
+  return t.replace(' ', 'T'); // "2024-01-15 09:30+08:00" → "2024-01-15T09:30+08:00"
 }
 function adbStatus(s) {
   if (!s) return 'scheduled';
@@ -865,10 +870,22 @@ async function lookupFlight() {
 }
 
 function toLocalDatetimeInput(isoStr) {
+  if (!isoStr) return '';
   try {
-    const d = new Date(isoStr);
-    const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    // Regex-extract YYYY-MM-DD and HH:MM — robust across all date string formats
+    const m = isoStr.match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
+    if (!m) return '';
+    const localPart = `${m[1]}T${m[2]}`;
+
+    // If UTC (ends in Z or +00:00) → convert to browser local time
+    if (/Z$|\+00:00/.test(isoStr)) {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return localPart; // fallback: use extracted part
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    // Has explicit non-UTC offset (e.g. +08:00) — preserve airport local time as-is
+    return localPart;
   } catch { return ''; }
 }
 
