@@ -1,5 +1,5 @@
 /* ===== Version ===== */
-const APP_VERSION = '2025-07-17 03:30 UTC';  // updated each deploy
+const APP_VERSION = '2025-07-17 04:10 UTC';  // updated each deploy
 
 /* ===== State ===== */
 const STATE = {
@@ -395,7 +395,7 @@ async function triggerRefresh() {
     const dispatchUrl = `https://api.github.com/repos/${ghRepo()}/actions/workflows/fetch-flights.yml/dispatches`;
     const dr = await fetch(dispatchUrl, {
       method: 'POST',
-      headers: ghHeaders(),
+      headers: ghWriteHeaders(),
       body: JSON.stringify({ ref: ghBranch() }),
     });
     if (!dr.ok) {
@@ -1070,7 +1070,7 @@ async function testGitHub() {
 
   if (!token) { el('github-status').textContent = ''; return; }
   try {
-    const r = await fetch(`https://api.github.com/repos/${repo}`, { headers: ghHeaders() });
+    const r = await fetch(`https://api.github.com/repos/${repo}`, { headers: ghReadHeaders() });
     const data = await r.json();
     if (r.ok) {
       el('github-status').textContent = `✓ Connected (${data.private ? 'private' : 'public'})`;
