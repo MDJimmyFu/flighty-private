@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-16T08:40:19.647730+00:00",
+  "updated_at": "2026-04-16T08:45:53.230698+00:00",
   "flights": [
     {
       "id": "JX820-2026-05-16-1776327989145",
@@ -10,11 +10,11 @@
       "aircraft_type": "Airbus A330-900",
       "origin": {
         "iata": "TPE",
-        "name": ""
+        "name": "Taipei Taiwan Taoyuan"
       },
       "destination": {
         "iata": "KIX",
-        "name": ""
+        "name": "Osaka Kansai"
       },
       "scheduled_departure": "2026-05-16T00:30:00.000Z",
       "scheduled_arrival": "2026-05-16T04:15:00.000Z",
