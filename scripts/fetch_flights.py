@@ -60,16 +60,30 @@ PHASES = [
 ]
 
 
-def nearest_flight_hours(tracked):
+def nearest_flight_hours(tracked, old_map=None):
     """
     Returns the minimum hours until (or since) any tracked flight's departure.
     Considers flights up to 24h after departure (in case still airborne/landing).
+    Also treats unresolved old flights (status still "scheduled") as urgent (0h)
+    so they are never skipped by the throttle.
     Returns None if there are no tracked flights.
     """
     now = datetime.now(timezone.utc)
     best = None
     for t in tracked:
-        # Use scheduled_departure if available, otherwise midnight of flight date
+        # If this old flight was never resolved, force an immediate fetch
+        if old_map is not None:
+            existing = old_map.get(t["id"], {})
+            if (existing.get("status") or "scheduled") == "scheduled":
+                date_str = t.get("date", "")
+                try:
+                    flight_day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    if (now - flight_day).days > 0:
+                        # Old unresolved flight — treat as highest-priority
+                        return 0
+                except Exception:
+                    pass
+
         dep_str = t.get("scheduled_departure") or ""
         dt = parse_dt(dep_str)
         if not dt:
@@ -93,9 +107,9 @@ def nearest_flight_hours(tracked):
     return best
 
 
-def get_fetch_interval(tracked):
+def get_fetch_interval(tracked, old_map=None):
     """Return (phase_name, interval_minutes) based on nearest flight."""
-    hours = nearest_flight_hours(tracked)
+    hours = nearest_flight_hours(tracked, old_map)
     if hours is None:
         return "no-flights", 30 * 24 * 60  # monthly if nothing tracked
     for phase_name, threshold_hours, interval_min in PHASES:
@@ -476,9 +490,16 @@ def main():
 
     tracked = flights_cfg.get("tracked", [])
 
+    # Load current state early so we can detect unresolved old flights
+    old_status = load_json("data/status.json",  {"flights": []})
+    history    = load_json("data/history.json", {"flights": []})
+    old_map    = {f["id"]: f for f in old_status.get("flights", [])}
+    hist_ids   = {f["id"] for f in history.get("flights", [])}
+
     # ── Global phase: determines if we run at all ──
-    global_phase, global_interval = get_fetch_interval(tracked)
-    nearest_hours = nearest_flight_hours(tracked)
+    # Pass old_map so unresolved past flights are treated as urgent (0h)
+    global_phase, global_interval = get_fetch_interval(tracked, old_map)
+    nearest_hours = nearest_flight_hours(tracked, old_map)
     hours_str = f"{nearest_hours:.1f}h away" if nearest_hours is not None else "none"
     print(f"Global phase: {global_phase} | Nearest: {hours_str} | Global interval: {global_interval}min")
 
@@ -488,12 +509,6 @@ def main():
         sys.exit(0)
 
     print("Proceeding with fetch run...")
-
-    old_status = load_json("data/status.json",  {"flights": []})
-    history    = load_json("data/history.json", {"flights": []})
-
-    old_map  = {f["id"]: f for f in old_status.get("flights", [])}
-    hist_ids = {f["id"] for f in history.get("flights", [])}
 
     # Per-flight AS metadata (last call time per flight)
     flight_meta = meta.get("flights", {})
@@ -519,8 +534,29 @@ def main():
             days_ago = 0
 
         if days_ago > 3:
-            print(f"\n{flight_iata}: {days_ago} days old, archiving")
-            current = old_map.get(flight_id, _default_flight(t))
+            print(f"\n{flight_iata}: {days_ago} days old — fetching final status then archiving")
+            current = dict(old_map.get(flight_id, _default_flight(t)))
+            # Always fetch actual status/delay before archiving if still unresolved
+            if (current.get("status") or "scheduled") in ("scheduled", ""):
+                fetched = False
+                if adb_key:
+                    print(f"  → AeroDataBox (final lookup)")
+                    adb_flights = aerodatabox_flight(flight_iata, flight_date, adb_key)
+                    if adb_flights:
+                        current = apply_aerodatabox(current, adb_flights, flight_date)
+                        print(f"    status={current.get('status')} delay_arr={current.get('delay_arrival')}min [ADB]")
+                        fetched = True
+                if not fetched and as_key:
+                    print(f"  → AviationStack (final lookup)")
+                    as_data = aviationstack_flight(flight_iata, flight_date, as_key)
+                    if as_data:
+                        current = apply_aviationstack(current, as_data)
+                        print(f"    status={current.get('status')} delay_arr={current.get('delay_arrival')}min [AS]")
+                        fetched = True
+                # If APIs still return no resolved status, infer landed (flight date is past)
+                if (current.get("status") or "scheduled") == "scheduled":
+                    current["status"] = "landed"
+                    print(f"    No API data — inferred status=landed (flight date is {days_ago}d ago)")
             current.pop("live", None)
             history["flights"].append(current)
             continue
