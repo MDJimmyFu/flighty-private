@@ -75,27 +75,49 @@ async function ghGetFile(path) {
   return r.json();
 }
 /**
+ * Reliably fetch a file's SHA + content from GitHub.
+ * Returns { sha, current } where sha=null only for genuine 404 (new file).
+ * Retries up to 3 times on transient errors.
+ */
+async function ghFetchForUpdate(path) {
+  let lastErr;
+  for (let i = 0; i < 3; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, 400 * i));
+    try {
+      const f = await ghGetFile(path);
+      let current = null;
+      try {
+        current = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, '')))));
+      } catch { /* content parse failed — sha is still valid */ }
+      return { sha: f.sha, current };
+    } catch (e) {
+      const msg = e.message || '';
+      if (msg.includes('GitHub 404')) return { sha: null, current: null }; // new file
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Read-modify-write a JSON file on GitHub with automatic SHA-conflict retry.
  * updateFn receives the current parsed content and returns the new content.
  */
 async function ghUpdateFile(path, updateFn, message) {
+  let { sha, current } = await ghFetchForUpdate(path);
+  const updated = updateFn(current);
+
+  // PUT with one retry if SHA is stale
   for (let attempt = 0; attempt < 2; attempt++) {
-    let sha = null, current = null;
-    try {
-      const f = await ghGetFile(path);
-      sha     = f.sha;
-      current = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, '')))));
-    } catch {
-      current = null; // file doesn't exist yet, or transient read error — retry will re-fetch
-    }
-    const updated = updateFn(current);
     try {
       return await ghPutFile(path, updated, sha, message);
     } catch (e) {
       const msg = e.message || '';
-      // "does not match" = stale SHA; "wasn't supplied" = ghGetFile failed so sha=null
-      // Both are recoverable by re-fetching the latest SHA on the next attempt
-      if (attempt === 0 && (msg.includes('does not match') || msg.includes("wasn't supplied"))) continue;
+      if (attempt === 0 && msg.includes('does not match')) {
+        // Another push landed between our GET and PUT — re-fetch SHA and retry once
+        ({ sha } = await ghFetchForUpdate(path));
+        continue;
+      }
       throw e;
     }
   }
