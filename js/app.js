@@ -248,7 +248,89 @@ function loadCache(key) {
   try { return JSON.parse(localStorage.getItem(CACHE_KEYS[key])) || null; } catch { return null; }
 }
 
+/* ===== API call counter ===== */
+// Tracks frontend-initiated lookups (AeroDataBox: 100/day, AviationStack: 100/month)
+function getApiUsage() {
+  try { return JSON.parse(localStorage.getItem('flighty_api_usage') || '{}'); } catch { return {}; }
+}
+function saveApiUsage(usage) {
+  try { localStorage.setItem('flighty_api_usage', JSON.stringify(usage)); } catch {}
+}
+function recordApiCall(api) {
+  const usage = getApiUsage();
+  const today = new Date().toISOString().slice(0, 10);             // YYYY-MM-DD
+  const month = today.slice(0, 7);                                 // YYYY-MM
+  if (api === 'adb') {
+    if (usage.adbDate !== today) { usage.adbDate = today; usage.adb = 0; }
+    usage.adb = (usage.adb || 0) + 1;
+  } else if (api === 'as') {
+    if (usage.asMonth !== month) { usage.asMonth = month; usage.as = 0; }
+    usage.as = (usage.as || 0) + 1;
+  }
+  saveApiUsage(usage);
+  renderApiUsage();
+}
+function renderApiUsage() {
+  const usage = getApiUsage();
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+
+  const adbCount = (usage.adbDate === today)  ? (usage.adb || 0) : 0;
+  const asCount  = (usage.asMonth === month)  ? (usage.as  || 0) : 0;
+
+  function updateBar(barId, countId, used, limit) {
+    const bar   = el(barId);
+    const count = el(countId);
+    if (!bar || !count) return;
+    const pct = Math.min(100, (used / limit) * 100);
+    bar.style.width = pct + '%';
+    bar.className = 'api-usage-bar' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
+    count.textContent = `${used} / ${limit}`;
+  }
+  updateBar('adb-usage-bar', 'adb-usage-count', adbCount, 100);
+  updateBar('as-usage-bar',  'as-usage-count',  asCount,  100);
+}
+
 /* ===== Load flight data ===== */
+async function fetchAllData() {
+  const [statusResult, historyResult, trackedResult] = await Promise.allSettled([
+    fetchRaw('data/status.json'),
+    fetchRaw('data/history.json'),
+    fetchRaw('flights.json'),
+  ]);
+
+  if (statusResult.status === 'fulfilled') {
+    STATE.flights = statusResult.value.data.flights || [];
+    saveCache('flights', STATE.flights);
+    const upd = statusResult.value.data.updated_at;
+    if (upd) el('last-updated').textContent = 'Updated ' + timeAgo(upd);
+  }
+  try {
+    const metaResult = await fetchRaw('data/meta.json');
+    const meta = metaResult.data;
+    const phaseLabel = {
+      'every-5min': '⚡ Live (every 5min)',
+      'hourly':     '🕐 Hourly',
+      'daily':      '📅 Daily',
+      'weekly':     '📆 Weekly',
+      'monthly':    '🗓 Monthly',
+      'no-flights': '💤 Standby',
+    };
+    const label = phaseLabel[meta.phase] || meta.phase;
+    el('last-updated').textContent = (el('last-updated').textContent || '') + `  ${label}`;
+  } catch { /* meta not yet available */ }
+
+  if (historyResult.status === 'fulfilled') {
+    STATE.history = historyResult.value.data.flights || [];
+    saveCache('history', STATE.history);
+  }
+  if (trackedResult.status === 'fulfilled') {
+    STATE.tracked = trackedResult.value.data.tracked || [];
+    saveCache('tracked', STATE.tracked);
+  }
+  renderDashboard();
+}
+
 async function loadData() {
   const btn = el('btn-refresh');
   btn.classList.add('spinning');
@@ -263,48 +345,79 @@ async function loadData() {
   if (cachedTracked || cachedFlights) renderDashboard();
 
   try {
-    const [statusResult, historyResult, trackedResult] = await Promise.allSettled([
-      fetchRaw('data/status.json'),
-      fetchRaw('data/history.json'),
-      fetchRaw('flights.json'),
-    ]);
-
-    if (statusResult.status === 'fulfilled') {
-      STATE.flights = statusResult.value.data.flights || [];
-      saveCache('flights', STATE.flights);
-      const upd = statusResult.value.data.updated_at;
-      if (upd) el('last-updated').textContent = 'Updated ' + timeAgo(upd);
-    }
-    // Show fetch phase from meta
-    try {
-      const metaResult = await fetchRaw('data/meta.json');
-      const meta = metaResult.data;
-      const phaseLabel = {
-        'every-5min': '⚡ Live (every 5min)',
-        'hourly':     '🕐 Hourly',
-        'daily':      '📅 Daily',
-        'weekly':     '📆 Weekly',
-        'monthly':    '🗓 Monthly',
-        'no-flights': '💤 Standby',
-      };
-      const label = phaseLabel[meta.phase] || meta.phase;
-      el('last-updated').textContent = (el('last-updated').textContent || '') + `  ${label}`;
-    } catch { /* meta not yet available */ }
-
-    if (historyResult.status === 'fulfilled') {
-      STATE.history = historyResult.value.data.flights || [];
-      saveCache('history', STATE.history);
-    }
-    if (trackedResult.status === 'fulfilled') {
-      STATE.tracked = trackedResult.value.data.tracked || [];
-      saveCache('tracked', STATE.tracked);
-    }
-
-    renderDashboard();
+    await fetchAllData();
   } catch (e) {
     toast('⚠️ Failed to load data: ' + e.message);
   } finally {
     btn.classList.remove('spinning');
+  }
+}
+
+/**
+ * Trigger the GitHub Actions fetch-flights workflow, then poll until
+ * status.json has a newer updated_at timestamp.
+ */
+async function triggerRefresh() {
+  const token = getSetting('githubToken');
+  if (!token) { toast('⚠️ GitHub token required — set it in Settings'); return; }
+
+  const btn = el('btn-refresh');
+  btn.classList.add('spinning');
+  el('last-updated').textContent = 'Triggering workflow…';
+
+  try {
+    // Capture current updated_at before trigger
+    let prevUpdated = '';
+    try {
+      const cur = await fetchRaw('data/status.json');
+      prevUpdated = cur.data.updated_at || '';
+    } catch { /* fine if no file yet */ }
+
+    // Dispatch workflow
+    const dispatchUrl = `https://api.github.com/repos/${ghRepo()}/actions/workflows/fetch-flights.yml/dispatches`;
+    const dr = await fetch(dispatchUrl, {
+      method: 'POST',
+      headers: ghHeaders(),
+      body: JSON.stringify({ ref: ghBranch() }),
+    });
+    if (!dr.ok) {
+      const e = await dr.json().catch(() => ({}));
+      throw new Error(e.message || `Dispatch failed (${dr.status})`);
+    }
+
+    toast('Workflow triggered — fetching latest data…');
+    el('last-updated').textContent = 'Workflow running…';
+
+    // Poll for updated status.json (up to ~90s, every 5s)
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      try {
+        const result = await fetchRaw('data/status.json');
+        const newUpdated = result.data.updated_at || '';
+        if (newUpdated && newUpdated !== prevUpdated) {
+          STATE.flights = result.data.flights || [];
+          saveCache('flights', STATE.flights);
+          el('last-updated').textContent = 'Updated ' + timeAgo(newUpdated);
+          await fetchAllData(); // also reload history + tracked
+          btn.classList.remove('spinning');
+          toast('Data refreshed');
+          return;
+        }
+      } catch { /* workflow may not have committed yet */ }
+      if (attempts < 18) {
+        setTimeout(poll, 5000);
+      } else {
+        btn.classList.remove('spinning');
+        el('last-updated').textContent = 'Workflow may still be running';
+        toast('Workflow triggered but no new data yet — check back in a moment');
+      }
+    };
+    setTimeout(poll, 5000); // first check after 5s
+  } catch (e) {
+    btn.classList.remove('spinning');
+    toast('⚠️ ' + e.message);
+    el('last-updated').textContent = '';
   }
 }
 
@@ -723,6 +836,7 @@ async function fetchAeroDataBox(flightNum, date) {
   );
   if (r.status === 404) return [];
   if (!r.ok) throw new Error(`AeroDataBox ${r.status}`);
+  recordApiCall('adb');
   const data = await r.json();
   // Normalize to common format
   return (Array.isArray(data) ? data : []).map(f => ({
@@ -774,6 +888,7 @@ async function fetchAviationStack(flightNum, date) {
   );
   const data = await r.json();
   if (data.error) throw new Error(data.error.message || 'AviationStack error');
+  recordApiCall('as');
   return (data.data || []).map(f => ({ ...f, _source: 'aviationstack' }));
 }
 
@@ -992,7 +1107,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Refresh
-  el('btn-refresh').addEventListener('click', loadData);
+  el('btn-refresh').addEventListener('click', triggerRefresh);
 
   // Add flight form
   el('add-flight-form').addEventListener('submit', addFlight);
@@ -1068,6 +1183,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load data
+  renderApiUsage();
   loadData();
   startAutoRefresh();
 });

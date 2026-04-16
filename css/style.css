@@ -753,6 +753,25 @@ small { font-size: 0.78rem; color: var(--text2); }
 .btn-icon.spinning { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* API usage bar */
+.api-usage-row {
+  display: flex; align-items: center; gap: 10px;
+  margin: 10px 0 14px; font-size: 0.8rem; color: var(--text3);
+}
+.api-usage-label { white-space: nowrap; }
+.api-usage-bar-wrap {
+  flex: 1; height: 6px; background: var(--bg3);
+  border-radius: 3px; overflow: hidden; min-width: 60px;
+}
+.api-usage-bar {
+  display: block; height: 100%; width: 0%;
+  background: #22d3ee; border-radius: 3px;
+  transition: width 0.4s ease, background 0.4s;
+}
+.api-usage-bar.warn  { background: #f59e0b; }
+.api-usage-bar.danger{ background: #f43f5e; }
+.api-usage-count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
 .btn-sm {
   font-size: 0.8rem;
   padding: 5px 12px;

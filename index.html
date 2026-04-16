@@ -258,6 +258,13 @@
           <input type="password" id="aerodatabox-key" placeholder="Your RapidAPI key">
           <small>也請在 GitHub Secrets 新增 <code>AERODATABOX_KEY</code> 供背景自動更新使用</small>
         </div>
+        <div class="api-usage-row">
+          <span class="api-usage-label">Today's usage (frontend lookups):</span>
+          <span class="api-usage-bar-wrap">
+            <span class="api-usage-bar" id="adb-usage-bar"></span>
+          </span>
+          <span class="api-usage-count" id="adb-usage-count">0 / 100</span>
+        </div>
         <button class="btn-primary" id="btn-save-adb">Save</button>
         <span class="save-status" id="adb-status"></span>
       </div>
@@ -272,6 +279,13 @@
           <label>API Key</label>
           <input type="password" id="aviationstack-key" placeholder="Your AviationStack API key">
           <small>也請在 GitHub Secrets 新增 <code>AVIATIONSTACK_KEY</code></small>
+        </div>
+        <div class="api-usage-row">
+          <span class="api-usage-label">This month's usage (frontend lookups):</span>
+          <span class="api-usage-bar-wrap">
+            <span class="api-usage-bar" id="as-usage-bar"></span>
+          </span>
+          <span class="api-usage-count" id="as-usage-count">0 / 100</span>
         </div>
         <button class="btn-primary" id="btn-save-as">Save</button>
         <span class="save-status" id="as-status"></span>
