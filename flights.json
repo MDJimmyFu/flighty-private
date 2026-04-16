@@ -11,6 +11,18 @@
       "scheduled_departure": "2026-05-16T00:30:00.000Z",
       "scheduled_arrival": "2026-05-16T04:15:00.000Z",
       "added_at": "2026-04-16T08:26:29.145Z"
+    },
+    {
+      "id": "JL99-2026-04-08-1776328806159",
+      "flight_number": "JL99",
+      "date": "2026-04-08",
+      "origin": "HND",
+      "destination": "TSA",
+      "airline": "JAL",
+      "aircraft_type": "Boeing 787-9",
+      "scheduled_departure": "2026-04-08T10:25:00.000Z",
+      "scheduled_arrival": "2026-04-08T12:50:00.000Z",
+      "added_at": "2026-04-16T08:40:06.159Z"
     }
   ]
 }
