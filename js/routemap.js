@@ -161,12 +161,13 @@ function renderRouteMap() {
   if (!_map) return;
   clearLayers();
 
-  // Merge active + tracked (show even if no status yet)
-  const activeIds = new Set(STATE.flights.map(f => f.id));
+  // Merge active + tracked (show even if no status yet), excluding archived flights
+  const activeIds  = new Set(STATE.flights.map(f => f.id));
+  const historyIds = new Set(STATE.history.map(f => f.id));
   const allFlights = [
     ...STATE.flights,
     ...STATE.tracked
-      .filter(t => !activeIds.has(t.id))
+      .filter(t => !activeIds.has(t.id) && !historyIds.has(t.id))
       .map(t => ({
         ...t,
         origin:      { iata: t.origin || '' },

@@ -1,5 +1,5 @@
 /* ===== Version ===== */
-const APP_VERSION = '2025-07-17 04:40 UTC';  // updated each deploy
+const APP_VERSION = '2025-07-17 05:10 UTC';  // updated each deploy
 
 /* ===== State ===== */
 const STATE = {
@@ -495,10 +495,11 @@ function renderDashboard() {
   const container = el('flights-container');
   const allFlights = [...STATE.flights];
 
-  // Merge tracked flights that have no status yet
-  const statusIds = new Set(allFlights.map(f => f.id));
+  // Merge tracked flights that have no status yet, skipping any already in history
+  const statusIds  = new Set(allFlights.map(f => f.id));
+  const historyIds = new Set(STATE.history.map(f => f.id));
   for (const t of STATE.tracked) {
-    if (!statusIds.has(t.id)) {
+    if (!statusIds.has(t.id) && !historyIds.has(t.id)) {
       allFlights.push({
         id: t.id,
         flight_number: t.flight_number,
