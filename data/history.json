@@ -23,6 +23,30 @@
       "delay_departure": 0,
       "delay_arrival": 0,
       "aircraft_registration": "JA877J"
+    },
+    {
+      "id": "JL5040-2026-03-30-1776330500594",
+      "flight_number": "JL5040",
+      "date": "2026-03-30",
+      "airline": "China Airlines",
+      "airline_iata": "CI",
+      "aircraft_type": "Airbus A321 NEO",
+      "origin": {
+        "iata": "TPE",
+        "name": "Taipei Taiwan Taoyuan"
+      },
+      "destination": {
+        "iata": "NRT",
+        "name": "Tokyo Narita"
+      },
+      "scheduled_departure": "2026-03-30T08:25+00:00",
+      "scheduled_arrival": "2026-03-30T11:50+00:00",
+      "actual_departure": null,
+      "actual_arrival": null,
+      "status": "landed",
+      "delay_departure": 0,
+      "delay_arrival": 0,
+      "aircraft_registration": "B-18108"
     }
   ]
 }
