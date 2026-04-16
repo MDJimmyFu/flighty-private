@@ -174,7 +174,36 @@ def _adb_time(t):
     """Convert AeroDataBox time '2024-01-15 02:00Z' → ISO 8601."""
     if not t:
         return None
+    if isinstance(t, dict):
+        # nested format: {"utc": "...", "local": "..."}
+        t = t.get("utc") or t.get("local") or ""
+    if not t:
+        return None
     return t.replace(" ", "T").rstrip("Z") + "+00:00"
+
+
+def _adb_get_time(obj, *flat_keys):
+    """
+    Read a time field from an AeroDataBox departure/arrival object.
+    Handles both flat  (scheduledTimeUtc)
+    and nested (scheduledTime.utc / scheduledTime.local) formats.
+    Tries UTC first, then local.
+    """
+    # Flat keys supplied by caller (e.g. "scheduledTimeUtc", "actualTimeUtc")
+    for key in flat_keys:
+        v = obj.get(key)
+        if v:
+            return _adb_time(v)
+    # Derive the nested key from the first flat key
+    # "scheduledTimeUtc" → "scheduledTime", "actualTimeUtc" → "actualTime"
+    for key in flat_keys:
+        nested_key = key.replace("TimeUtc", "Time").replace("TimeLocal", "Time")
+        nested = obj.get(nested_key)
+        if nested and isinstance(nested, dict):
+            v = nested.get("utc") or nested.get("local")
+            if v:
+                return _adb_time(v)
+    return None
 
 
 def apply_aerodatabox(current, adb_flights, flight_date):
@@ -182,11 +211,15 @@ def apply_aerodatabox(current, adb_flights, flight_date):
     if not adb_flights:
         return current
 
+    def dep_sched_utc(candidate):
+        dep = candidate.get("departure") or {}
+        return _adb_get_time(dep, "scheduledTimeUtc", "scheduledTimeLocal") or ""
+
     # Pick the flight whose departure date matches
     f = None
     for candidate in adb_flights:
-        sched = (candidate.get("departure") or {}).get("scheduledTimeUtc", "") or ""
-        if flight_date and sched.replace("T", " ").startswith(flight_date):
+        sched = dep_sched_utc(candidate)
+        if flight_date and sched.startswith(flight_date[:10]):
             f = candidate
             break
     if f is None:
@@ -203,9 +236,9 @@ def apply_aerodatabox(current, adb_flights, flight_date):
 
     airline  = f.get("airline")  or {}
     aircraft = f.get("aircraft") or {}
-    setif("airline",              airline.get("name"))
-    setif("airline_iata",         airline.get("iata"))
-    setif("aircraft_type",        aircraft.get("model"))
+    setif("airline",               airline.get("name"))
+    setif("airline_iata",          airline.get("iata"))
+    setif("aircraft_type",         aircraft.get("model"))
     setif("aircraft_registration", aircraft.get("reg"))
 
     if dep_apt.get("iata"):  current.setdefault("origin", {})["iata"]      = dep_apt["iata"]
@@ -213,10 +246,16 @@ def apply_aerodatabox(current, adb_flights, flight_date):
     if arr_apt.get("iata"):  current.setdefault("destination", {})["iata"] = arr_apt["iata"]
     if arr_apt.get("name"):  current.setdefault("destination", {})["name"] = arr_apt["name"]
 
-    setif("scheduled_departure", _adb_time(dep.get("scheduledTimeUtc")))
-    setif("scheduled_arrival",   _adb_time(arr.get("scheduledTimeUtc")))
-    if dep.get("actualTimeUtc"): current["actual_departure"] = _adb_time(dep["actualTimeUtc"])
-    if arr.get("actualTimeUtc"): current["actual_arrival"]   = _adb_time(arr["actualTimeUtc"])
+    # Times — try both flat and nested field formats
+    sched_dep = _adb_get_time(dep, "scheduledTimeUtc", "scheduledTimeLocal")
+    sched_arr = _adb_get_time(arr, "scheduledTimeUtc", "scheduledTimeLocal")
+    act_dep   = _adb_get_time(dep, "actualTimeUtc",    "actualTimeLocal")
+    act_arr   = _adb_get_time(arr, "actualTimeUtc",    "actualTimeLocal")
+
+    setif("scheduled_departure", sched_dep)
+    setif("scheduled_arrival",   sched_arr)
+    if act_dep: current["actual_departure"] = act_dep
+    if act_arr: current["actual_arrival"]   = act_arr
 
     # Status mapping
     status_map = {
@@ -226,7 +265,7 @@ def apply_aerodatabox(current, adb_flights, flight_date):
     if f.get("status"):
         current["status"] = status_map.get(f["status"], "scheduled")
 
-    # Delays (prefer explicit field, fall back to computed)
+    # Delays: prefer computed from actual vs scheduled; fall back to API delay field
     if current.get("actual_departure") and current.get("scheduled_departure"):
         d = delay_min(current["scheduled_departure"], current["actual_departure"])
         if d is not None:
