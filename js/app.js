@@ -1,5 +1,5 @@
 /* ===== Version ===== */
-const APP_VERSION = '2025-07-17 04:10 UTC';  // updated each deploy
+const APP_VERSION = '2025-07-17 04:40 UTC';  // updated each deploy
 
 /* ===== State ===== */
 const STATE = {
@@ -854,10 +854,10 @@ function clearLookupStatus() {
 /** Called automatically when flight number + date are both filled */
 function scheduleAutoLookup() {
   clearTimeout(_lookupTimer);
-  const num  = el('flight-number').value.trim();
+  const num  = el('flight-number').value.trim().replace(/\s+/g, '');
   const date = el('flight-date').value;
-  // Need at least "XX0" (prefix + 1 digit) and a date
-  if (!date || !/^[A-Za-z]{1,3}\d{1,4}$/.test(num)) return;
+  // AeroDataBox requires 2-letter IATA prefix + 1-4 digits (e.g. CI123, JL99)
+  if (!date || !/^[A-Za-z]{2}\d{1,4}$/.test(num)) return;
   _lookupTimer = setTimeout(() => doLookup(num.toUpperCase(), date), 700);
 }
 
@@ -865,16 +865,38 @@ function scheduleAutoLookup() {
 async function fetchAeroDataBox(flightNum, date) {
   const key = getSetting('aeroDataBoxKey');
   if (!key) return null;
-  const r = await fetch(
-    `https://aerodatabox.p.rapidapi.com/flights/number/${flightNum}/${date}`,
-    { headers: { 'X-RapidAPI-Key': key, 'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com' } }
-  );
+
+  // AeroDataBox requires exactly 2-letter IATA prefix + digits, no spaces
+  const clean = flightNum.replace(/\s+/g, '').toUpperCase();
+
+  let r;
+  try {
+    r = await fetch(
+      `https://aerodatabox.p.rapidapi.com/flights/number/${clean}/${date}`,
+      { headers: { 'X-RapidAPI-Key': key, 'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com' } }
+    );
+  } catch (netErr) {
+    throw new Error(`AeroDataBox network error: ${netErr.message}`);
+  }
+
   if (r.status === 404) return [];
-  if (!r.ok) throw new Error(`AeroDataBox ${r.status}`);
+  if (!r.ok) {
+    // Read error body so we can surface the actual API message (e.g. "The string did not match…")
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.message || `AeroDataBox error ${r.status}`);
+  }
+
   recordApiCall('adb');
   const data = await r.json();
+
+  // AeroDataBox can return an error envelope as HTTP 200 in some edge cases
+  if (!Array.isArray(data)) {
+    if (data && data.message) throw new Error(`AeroDataBox: ${data.message}`);
+    return [];
+  }
+
   // Normalize to common format
-  return (Array.isArray(data) ? data : []).map(f => ({
+  return data.map(f => ({
     departure: {
       iata:      f.departure?.airport?.iata,
       airport:   f.departure?.airport?.name,
