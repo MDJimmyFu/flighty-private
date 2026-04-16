@@ -1,5 +1,5 @@
 /* ===== Version ===== */
-const APP_VERSION = '2025-07-17 05:10 UTC';  // updated each deploy
+const APP_VERSION = '2025-07-17 06:00 UTC';  // updated each deploy
 
 /* ===== State ===== */
 const STATE = {
@@ -562,12 +562,16 @@ function renderFlightCard(f) {
   const destName = f.destination?.name || '';
   const hasLive = f.live && !f.live.on_ground;
 
+  const opTag = f.operating_flight_number
+    ? `<span class="codeshare-tag" title="Operated as ${f.operating_flight_number}${f.operating_airline ? ' · ' + f.operating_airline : ''}">✈ ${f.operating_flight_number}</span>`
+    : '';
+
   return `
 <div class="flight-card ${statusClass(f)}" id="card-${f.id}">
   <div class="flight-card-header">
     <div>
-      <div class="flight-number">${f.flight_number}</div>
-      <div class="flight-airline">${f.airline || ''} ${f.date ? '· ' + fmtDate(f.date) : ''}</div>
+      <div class="flight-number">${f.flight_number}${opTag}</div>
+      <div class="flight-airline">${f.airline || ''} ${f.date ? '· ' + fmtDate(f.date) : ''}${f.operating_airline && f.operating_airline !== f.airline ? ' <span class="op-airline">Operated by ' + f.operating_airline + '</span>' : ''}</div>
     </div>
     <div class="flight-card-badges">
       ${f.aircraft_type ? `<span class="aircraft-tag">${f.aircraft_type}</span>` : ''}
@@ -729,6 +733,7 @@ function renderHistory() {
     <div class="history-route">${f.flight_number} &nbsp; ${origin} → ${dest}</div>
     <div class="history-meta">
       <span>${f.airline || f.airline_iata || ''}</span>
+      ${f.operating_flight_number ? `<span class="codeshare-tag-sm" title="Operated as ${f.operating_flight_number}">✈ ${f.operating_flight_number}</span>` : ''}
       ${f.aircraft_type ? `<span>· ${f.aircraft_type}</span>` : ''}
       <span>· ${delayStr}</span>
     </div>
@@ -897,7 +902,7 @@ async function fetchAeroDataBox(flightNum, date) {
   }
 
   // Normalize to common format
-  return data.map(f => ({
+  const normalized = data.map(f => ({
     departure: {
       iata:      f.departure?.airport?.iata,
       airport:   f.departure?.airport?.name,
@@ -920,8 +925,20 @@ async function fetchAeroDataBox(flightNum, date) {
     airline:      { name: f.airline?.name, iata: f.airline?.iata },
     aircraft:     { iata: f.aircraft?.model, registration: f.aircraft?.reg },
     flight_status: adbStatus(f.status),
+    codeshare_status: f.codeshareStatus || null,
     _source: 'aerodatabox',
   }));
+
+  // Annotate codeshare entries with their operator (if present in the same response)
+  const operatorEntry = normalized.find(n => n.codeshare_status === 'IsOperator');
+  for (const n of normalized) {
+    if (n.codeshare_status === 'IsCodeshare' && operatorEntry) {
+      n.operating_flight_number = `${operatorEntry.airline?.iata || ''}${data.find(f => f.codeshareStatus === 'IsOperator')?.number || ''}`.trim();
+      n.operating_airline       = operatorEntry.airline?.name || '';
+      n.operating_airline_iata  = operatorEntry.airline?.iata || '';
+    }
+  }
+  return normalized;
 }
 
 // AeroDataBox time: normalize space separator, keep timezone info intact
@@ -998,7 +1015,11 @@ async function doLookup(flightNum, date) {
 
   if (unique.length === 1) {
     applyFlightData(unique[0]);
-    setLookupStatus('success', `✓ 已自動填入（來源：${source}）`);
+    const f0 = unique[0];
+    const opNote = f0.operating_flight_number
+      ? ` · Codeshare — operated as <strong>${f0.operating_flight_number}</strong>${f0.operating_airline ? ' (' + f0.operating_airline + ')' : ''}`
+      : '';
+    setLookupStatus('success', `✓ 已自動填入（來源：${source}）${opNote}`);
   } else {
     setLookupStatus('success', `✓ 找到 ${unique.length} 個航線（來源：${source}）— 請選擇`);
     showLookupOptions(unique);

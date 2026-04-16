@@ -246,6 +246,38 @@ def apply_aerodatabox(current, adb_flights, flight_date):
     if arr_apt.get("iata"):  current.setdefault("destination", {})["iata"] = arr_apt["iata"]
     if arr_apt.get("name"):  current.setdefault("destination", {})["name"] = arr_apt["name"]
 
+    # ── Codeshare detection ──────────────────────────────────────────────────
+    # AeroDataBox returns codeshareStatus = "IsCodeshare" on marketing flights.
+    # The same response array often contains an "IsOperator" entry with actual
+    # times/delays and the true callsign used for OpenSky ADS-B tracking.
+    codeshare_status = f.get("codeshareStatus") or ""
+    op_entry = None
+    if codeshare_status == "IsCodeshare":
+        for candidate in adb_flights:
+            if candidate.get("codeshareStatus") == "IsOperator":
+                op_entry = candidate
+                break
+
+    if op_entry:
+        op_airline  = op_entry.get("airline") or {}
+        op_iata     = op_airline.get("iata", "")
+        op_number   = op_entry.get("number", "")
+        current["operating_flight_number"] = f"{op_iata}{op_number}".strip()
+        current["operating_airline"]       = op_airline.get("name", "")
+        current["operating_airline_iata"]  = op_iata
+        print(f"    Codeshare detected: operated as {current['operating_flight_number']}")
+        # Prefer operator's entry for times/delays — it has the real ADS-B data
+        op_dep = op_entry.get("departure") or {}
+        op_arr = op_entry.get("arrival")   or {}
+        op_act_dep = _adb_get_time(op_dep, "actualTimeUtc", "actualTimeLocal")
+        op_act_arr = _adb_get_time(op_arr, "actualTimeUtc", "actualTimeLocal")
+        if op_act_dep: dep = op_dep   # use operator dep for delay fields below
+        if op_act_arr: arr = op_arr
+    elif codeshare_status == "IsCodeshare":
+        # Flagged as codeshare but no operator entry in this response
+        current["operating_flight_number"] = ""
+        current["operating_airline"]       = ""
+
     # Times — try both flat and nested field formats
     sched_dep = _adb_get_time(dep, "scheduledTimeUtc", "scheduledTimeLocal")
     sched_arr = _adb_get_time(arr, "scheduledTimeUtc", "scheduledTimeLocal")
@@ -659,7 +691,10 @@ def main():
                 print(f"  → Fetching OpenSky states (shared)")
                 opensky_states = fetch_opensky_states()
 
-            callsign = iata_to_callsign(flight_iata)
+            # Use operating flight number for callsign if this is a codeshare
+            op_flight = current.get("operating_flight_number") or ""
+            lookup_iata = op_flight if op_flight else flight_iata
+            callsign = iata_to_callsign(lookup_iata)
             live = find_in_states(opensky_states, callsign)
             if live:
                 current["live"] = live

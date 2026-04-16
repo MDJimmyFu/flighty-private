@@ -324,6 +324,31 @@ h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 14px; color: var(--tex
   padding: 3px 9px;
   border-radius: 100px;
 }
+.codeshare-tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  background: rgba(34,211,238,0.12);
+  color: var(--cyan);
+  padding: 2px 8px;
+  border-radius: 100px;
+  margin-left: 8px;
+  vertical-align: middle;
+  font-weight: 500;
+  cursor: default;
+}
+.codeshare-tag-sm {
+  font-size: 0.72rem;
+  background: rgba(34,211,238,0.10);
+  color: var(--cyan);
+  padding: 1px 6px;
+  border-radius: 100px;
+  margin-left: 4px;
+}
+.op-airline {
+  font-size: 0.78rem;
+  color: var(--text3);
+  font-style: italic;
+}
 
 /* ── History ── */
 .history-item {
