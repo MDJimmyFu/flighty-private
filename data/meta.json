@@ -1,12 +1,12 @@
 {
-  "last_fetch_at": "2026-04-23T07:52:50.147910+00:00",
+  "last_fetch_at": "2026-04-23T09:18:45.771831+00:00",
   "phase": "every-5min",
   "interval_min": 5,
-  "next_fetch_at": "2026-04-23T07:57:50.147910+00:00",
+  "next_fetch_at": "2026-04-23T09:23:45.771831+00:00",
   "nearest_flight_hours": 0,
   "flights": {
     "JX820-2026-05-16-1776327989145": {
-      "last_as_fetch_at": "2026-04-16T08:45:53.230698+00:00",
+      "last_as_fetch_at": "2026-04-23T09:18:45.771831+00:00",
       "phase": "weekly",
       "as_interval_min": 10080
     }

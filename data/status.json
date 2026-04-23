@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-23T07:52:50.147910+00:00",
+  "updated_at": "2026-04-23T09:18:45.771831+00:00",
   "flights": [
     {
       "id": "JX820-2026-05-16-1776327989145",
@@ -16,11 +16,11 @@
         "iata": "KIX",
         "name": "Osaka Kansai"
       },
-      "scheduled_departure": "2026-05-16T00:30:00.000Z",
-      "scheduled_arrival": "2026-05-16T04:15:00.000Z",
+      "scheduled_departure": "2026-05-16T00:30+00:00",
+      "scheduled_arrival": "2026-05-16T03:15+00:00",
       "actual_departure": null,
       "actual_arrival": null,
-      "status": "active",
+      "status": "scheduled",
       "delay_departure": 0,
       "delay_arrival": 0,
       "live": null
