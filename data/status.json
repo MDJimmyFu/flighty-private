@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-26T23:41:34.929583+00:00",
+  "updated_at": "2026-04-27T01:15:04.703560+00:00",
   "flights": [
     {
       "id": "JX820-2026-05-16-1776327989145",
@@ -20,10 +20,23 @@
       "scheduled_arrival": "2026-05-16T03:15+00:00",
       "actual_departure": null,
       "actual_arrival": null,
-      "status": "scheduled",
+      "status": "active",
       "delay_departure": 0,
       "delay_arrival": 0,
-      "live": null
+      "live": {
+        "icao24": "8991e6",
+        "callsign": "SJX820",
+        "latitude": 26.1121,
+        "longitude": 123.2011,
+        "altitude_m": 10355.58,
+        "altitude_ft": 33975,
+        "on_ground": false,
+        "velocity_ms": 275.24,
+        "speed_kt": 535,
+        "heading": 52.59,
+        "vertical_rate": 6.83,
+        "updated_at": "2026-04-27T01:15:05.953681+00:00"
+      }
     }
   ]
 }
